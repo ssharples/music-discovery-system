@@ -1,0 +1,12 @@
+# Ultra-minimal requirements for Docker deployment
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-ai
+supabase
+redis
+httpx
+python-multipart
+youtube-transcript-api
+beautifulsoup4
+python-dotenv 
