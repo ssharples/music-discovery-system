@@ -1,7 +1,7 @@
 # backend/app/core/config.py
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
-from typing import List, Optional
+from typing import List, Optional, Union
 import os
 
 class Settings(BaseSettings):
@@ -21,7 +21,10 @@ class Settings(BaseSettings):
     REDIS_URL: str = Field("redis://localhost:6379", env="REDIS_URL")
     
     # Application
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:5173"]
+    ALLOWED_ORIGINS: Union[str, List[str]] = Field(
+        default="http://localhost:3000,http://localhost:5173",
+        env="ALLOWED_ORIGINS"
+    )
     SECRET_KEY: str = Field(..., env="SECRET_KEY")
     
     # Environment
@@ -39,11 +42,11 @@ class Settings(BaseSettings):
     # Monitoring
     SENTRY_DSN: Optional[str] = Field(None, env="SENTRY_DSN")
     
-    @field_validator('ALLOWED_ORIGINS', mode='before')
+    @field_validator('ALLOWED_ORIGINS')
     @classmethod
     def parse_cors_origins(cls, v):
         if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
     
     @field_validator('SECRET_KEY')
