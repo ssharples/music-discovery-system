@@ -103,6 +103,17 @@ class DiscoveryOrchestrator:
         try:
             logger.info(f"Starting discovery pipeline for session {session_id}")
             
+            # Test WebSocket notification first
+            try:
+                await notify_discovery_progress(str(session_id), {
+                    "phase": "pipeline_started",
+                    "message": f"🚀 Discovery pipeline starting for session {session_id}",
+                    "progress": 5
+                })
+                logger.info("WebSocket notification sent successfully")
+            except Exception as ws_error:
+                logger.error(f"WebSocket notification failed: {ws_error}")
+            
             # Notify start of YouTube discovery phase
             await notify_discovery_progress(str(session_id), {
                 "phase": "youtube_discovery",
@@ -111,11 +122,13 @@ class DiscoveryOrchestrator:
             })
             
             # Phase 1: YouTube Discovery
+            logger.info(f"About to call YouTube discovery with query: {request.search_query}")
             discovered_channels = await self._discover_youtube_artists(
                 deps, request.search_query, request.max_results, session_id
             )
             
             logger.info(f"Discovered {len(discovered_channels)} potential artists")
+            logger.info(f"Channel data preview: {discovered_channels[:2] if discovered_channels else 'No channels'}")
             
             await notify_discovery_progress(str(session_id), {
                 "phase": "youtube_discovery_complete",
@@ -241,21 +254,50 @@ class DiscoveryOrchestrator:
     ) -> List[Dict[str, Any]]:
         """Discover artists on YouTube"""
         
-        # Check API quota
-        quota_available = await self._check_youtube_quota(deps)
-        if quota_available < 100:
-            logger.warning(f"Low YouTube quota: {quota_available}")
-            max_results = min(max_results, 10)
+        try:
+            logger.info(f"Starting YouTube discovery for session {session_id}")
             
-        # Discover artists
-        channels = await self.youtube_agent.discover_artists(
-            deps, query, max_results
-        )
-        
-        # Update quota usage
-        await self._update_api_usage(deps, "youtube", len(channels) * 2)
-        
-        return channels
+            # Check API quota
+            quota_available = await self._check_youtube_quota(deps)
+            logger.info(f"YouTube quota available: {quota_available}")
+            
+            if quota_available < 100:
+                logger.warning(f"Low YouTube quota: {quota_available}")
+                await notify_discovery_progress(str(session_id), {
+                    "phase": "quota_warning",
+                    "message": f"⚠️ Low YouTube quota: {quota_available} requests remaining",
+                    "progress": 15
+                })
+                max_results = min(max_results, 10)
+                
+            # Notify quota check complete
+            await notify_discovery_progress(str(session_id), {
+                "phase": "quota_checked",
+                "message": f"✅ API quota OK: {quota_available} requests available",
+                "progress": 20
+            })
+            
+            # Discover artists
+            logger.info(f"Calling YouTube agent with query: '{query}', max_results: {max_results}")
+            channels = await self.youtube_agent.discover_artists(
+                deps, query, max_results
+            )
+            logger.info(f"YouTube agent returned {len(channels)} channels")
+            
+            # Update quota usage
+            await self._update_api_usage(deps, "youtube", len(channels) * 2)
+            
+            return channels
+            
+        except Exception as e:
+            logger.error(f"YouTube discovery failed: {e}")
+            await notify_discovery_progress(str(session_id), {
+                "phase": "youtube_error",
+                "message": f"❌ YouTube discovery failed: {str(e)}",
+                "progress": 0,
+                "error": str(e)
+            })
+            return []
         
     async def _process_artist(
         self,
