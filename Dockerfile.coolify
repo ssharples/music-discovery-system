@@ -10,7 +10,10 @@ RUN apt-get update && apt-get install -y \
     curl \
     gcc \
     redis-server \
-    && rm -rf /var/lib/apt/lists/*
+    procps \
+    && rm -rf /var/lib/apt/lists/* \
+    && which nginx \
+    && nginx -t
 
 # Install Python dependencies
 COPY backend/requirements-minimal.txt .
