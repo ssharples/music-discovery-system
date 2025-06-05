@@ -1,6 +1,7 @@
 # backend/app/main.py
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from contextlib import asynccontextmanager
 import asyncio
 import logging
@@ -103,12 +104,14 @@ app.include_router(websocket.router)
 
 @app.get("/")
 async def root():
-    """Root endpoint"""
+    """Root endpoint - redirect to frontend if accessing via browser"""
+    # If this is being accessed directly via domain, redirect to frontend
     return {
         "message": "Music Artist Discovery System API",
-        "version": "1.0.0",
+        "version": "1.0.0", 
         "environment": settings.ENVIRONMENT,
-        "status": "operational"
+        "status": "operational",
+        "frontend_url": "Please access the admin dashboard on port 3000"
     }
 
 @app.get("/health")
