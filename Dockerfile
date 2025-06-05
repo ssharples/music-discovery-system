@@ -44,9 +44,10 @@ RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /usr/share/nginx/html
 
 # Create log directories and set permissions
-RUN mkdir -p /var/log/supervisor /var/log/nginx /var/lib/redis && \
+RUN mkdir -p /var/log/supervisor /var/log/nginx /var/lib/redis /var/run && \
     chown -R appuser:appuser /var/log/supervisor /var/log/nginx /var/lib/redis && \
-    chmod -R 755 /var/log/supervisor /var/log/nginx
+    chmod -R 755 /var/log/supervisor /var/log/nginx && \
+    chmod 777 /var/run
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
@@ -54,6 +55,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 
 EXPOSE 80 8000
 
-USER appuser
+# Run as root to allow supervisord to manage services properly
+USER root
 
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"] 
