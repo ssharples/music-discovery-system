@@ -14,9 +14,10 @@ from app.models.artist import (
     DiscoveryRequest, ArtistProfile, VideoMetadata, 
     LyricAnalysis, EnrichedArtistData
 )
-from app.agents.youtube_agent import YouTubeDiscoveryAgent
-from app.agents.enrichment_agent import ArtistEnrichmentAgent
-from app.agents.lyrics_agent import LyricsAnalysisAgent
+# TESTING: Commenting out agent imports to test for pydantic-ai blocking at import time
+# from app.agents.youtube_agent import YouTubeDiscoveryAgent
+# from app.agents.enrichment_agent import ArtistEnrichmentAgent
+# from app.agents.lyrics_agent import LyricsAnalysisAgent
 from app.agents.storage_agent import StorageAgent
 from app.api.websocket import (
     notify_discovery_started, notify_discovery_progress, 
