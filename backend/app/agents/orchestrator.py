@@ -88,14 +88,11 @@ class DiscoveryOrchestrator:
         })
         
         # Start discovery in background
-        logger.info("🏃 Adding discovery pipeline to background tasks...")
-        background_tasks.add_task(
-            self._run_discovery_pipeline,
-            session_id,
-            request,
-            deps
+        logger.info("🏃 Starting discovery pipeline as asyncio task...")
+        asyncio.create_task(
+            self._run_discovery_pipeline(session_id, request, deps)
         )
-        logger.info("✅ Background task added successfully")
+        logger.info("✅ Asyncio task created successfully")
         
         return session_id
         
@@ -109,6 +106,7 @@ class DiscoveryOrchestrator:
         
         logger.info(f"🚀 PIPELINE ENTRY: _run_discovery_pipeline called for session {session_id}")
         logger.info(f"📋 Request details: query='{request.search_query}', max_results={request.max_results}")
+        logger.info(f"🔧 Pipeline task started - this should print immediately!")
         
         try:
             logger.info(f"Starting discovery pipeline for session {session_id}")
