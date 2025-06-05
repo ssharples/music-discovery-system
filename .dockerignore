@@ -1,0 +1,47 @@
+# Git
+.git
+.gitignore
+
+# Environment files
+.env
+.env.local
+.env.example
+
+# Documentation
+README.md
+DEPLOYMENT.md
+Project-plan.md
+*.md
+
+# Development files
+.vscode
+.idea
+*.log
+
+# Dependencies
+node_modules
+backend/venv
+backend/__pycache__
+backend/app/__pycache__
+**/__pycache__
+**/*.pyc
+
+# Build outputs
+frontend/dist
+frontend/build
+backend/build
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.yml
+docker-compose.prod.yml
+Dockerfile.dev
+
+# Monitoring
+monitoring/
+
+# Scripts
+setup.sh 
