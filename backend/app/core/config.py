@@ -1,5 +1,6 @@
 # backend/app/core/config.py
-from pydantic import BaseSettings, Field, validator
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings
 from typing import List, Optional
 import os
 
@@ -38,20 +39,23 @@ class Settings(BaseSettings):
     # Monitoring
     SENTRY_DSN: Optional[str] = Field(None, env="SENTRY_DSN")
     
-    @validator('ALLOWED_ORIGINS', pre=True)
+    @field_validator('ALLOWED_ORIGINS', mode='before')
+    @classmethod
     def parse_cors_origins(cls, v):
         if isinstance(v, str):
             return [origin.strip() for origin in v.split(",")]
         return v
     
-    @validator('SECRET_KEY')
+    @field_validator('SECRET_KEY')
+    @classmethod
     def validate_secret_key(cls, v):
         if len(v) < 32:
             raise ValueError('SECRET_KEY must be at least 32 characters long')
         return v
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    model_config = {
+        "env_file": ".env",
+        "case_sensitive": True
+    }
 
 settings = Settings() 
