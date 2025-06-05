@@ -352,7 +352,7 @@ class DiscoveryOrchestrator:
     async def _check_youtube_quota(self, deps: PipelineDependencies) -> int:
         """Check remaining YouTube API quota"""
         
-        result = await deps.supabase.table("api_rate_limits").select("*").eq("api_name", "youtube").execute()
+        result = deps.supabase.table("api_rate_limits").select("*").eq("api_name", "youtube").execute()
         
         if result.data:
             quota_data = result.data[0]
@@ -378,7 +378,7 @@ class DiscoveryOrchestrator:
     ):
         """Update API usage tracking"""
         
-        result = await deps.supabase.table("api_rate_limits").select("*").eq("api_name", api_name).execute()
+        result = deps.supabase.table("api_rate_limits").select("*").eq("api_name", api_name).execute()
         
         if result.data:
             # Update existing

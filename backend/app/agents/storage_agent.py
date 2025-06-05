@@ -19,7 +19,7 @@ class StorageAgent:
     ) -> bool:
         """Create a new discovery session"""
         try:
-            result = await deps.supabase.table("discovery_sessions").insert(session_data).execute()
+            result = deps.supabase.table("discovery_sessions").insert(session_data).execute()
             return result.data is not None
         except Exception as e:
             logger.error(f"Error creating discovery session: {e}")
@@ -33,7 +33,7 @@ class StorageAgent:
     ) -> bool:
         """Update discovery session"""
         try:
-            result = await deps.supabase.table("discovery_sessions").update(
+            result = deps.supabase.table("discovery_sessions").update(
                 update_data
             ).eq("id", session_id).execute()
             return result.data is not None
@@ -49,7 +49,7 @@ class StorageAgent:
         """Store video metadata"""
         try:
             # Check if video already exists
-            existing = await deps.supabase.table("videos").select("*").eq(
+            existing = deps.supabase.table("videos").select("*").eq(
                 "youtube_video_id", video.youtube_video_id
             ).execute()
             
@@ -71,7 +71,7 @@ class StorageAgent:
                 "metadata": video.metadata
             }
             
-            result = await deps.supabase.table("videos").insert(video_data).execute()
+            result = deps.supabase.table("videos").insert(video_data).execute()
             
             if result.data:
                 return result.data[0]
@@ -101,7 +101,7 @@ class StorageAgent:
                 "analysis_metadata": analysis.analysis_metadata
             }
             
-            result = await deps.supabase.table("lyric_analyses").insert(analysis_data).execute()
+            result = deps.supabase.table("lyric_analyses").insert(analysis_data).execute()
             
             if result.data:
                 return result.data[0]
@@ -119,7 +119,7 @@ class StorageAgent:
     ) -> Optional[Dict[str, Any]]:
         """Get artist by ID"""
         try:
-            result = await deps.supabase.table("artists").select("*").eq("id", artist_id).single().execute()
+            result = deps.supabase.table("artists").select("*").eq("id", artist_id).single().execute()
             return result.data
         except Exception as e:
             logger.error(f"Error fetching artist: {e}")
@@ -134,7 +134,7 @@ class StorageAgent:
     ) -> List[Dict[str, Any]]:
         """Get artists by status"""
         try:
-            result = await deps.supabase.table("artists").select("*").eq(
+            result = deps.supabase.table("artists").select("*").eq(
                 "status", status
             ).range(offset, offset + limit - 1).execute()
             return result.data or []
@@ -150,7 +150,7 @@ class StorageAgent:
     ) -> List[Dict[str, Any]]:
         """Get high-value artists based on enrichment score"""
         try:
-            result = await deps.supabase.table("artists").select("*").gte(
+            result = deps.supabase.table("artists").select("*").gte(
                 "enrichment_score", min_score
             ).order("enrichment_score", desc=True).limit(limit).execute()
             return result.data or []
@@ -166,7 +166,7 @@ class StorageAgent:
     ) -> List[Dict[str, Any]]:
         """Search artists by name"""
         try:
-            result = await deps.supabase.table("artists").select("*").ilike(
+            result = deps.supabase.table("artists").select("*").ilike(
                 "name", f"%{query}%"
             ).limit(limit).execute()
             return result.data or []
@@ -182,7 +182,7 @@ class StorageAgent:
         """Store or update artist profile"""
         try:
             # Check if artist already exists
-            existing = await deps.supabase.table("artists").select("*").eq(
+            existing = deps.supabase.table("artists").select("*").eq(
                 "youtube_channel_id", artist.youtube_channel_id
             ).execute()
             
@@ -207,7 +207,7 @@ class StorageAgent:
             
             if existing.data:
                 # Update existing artist
-                result = await deps.supabase.table("artists").update(
+                result = deps.supabase.table("artists").update(
                     artist_data
                 ).eq("id", existing.data[0]["id"]).execute()
                 
@@ -216,7 +216,7 @@ class StorageAgent:
             else:
                 # Insert new artist
                 artist_data["discovery_date"] = datetime.now().isoformat()
-                result = await deps.supabase.table("artists").insert(artist_data).execute()
+                result = deps.supabase.table("artists").insert(artist_data).execute()
                 
                 if result.data:
                     return result.data[0]
@@ -236,7 +236,7 @@ class StorageAgent:
         """Update artist profile"""
         try:
             update_data["last_updated"] = datetime.now().isoformat()
-            result = await deps.supabase.table("artists").update(
+            result = deps.supabase.table("artists").update(
                 update_data
             ).eq("id", artist_id).execute()
             return result.data is not None
