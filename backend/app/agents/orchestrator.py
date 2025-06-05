@@ -18,6 +18,10 @@ from app.agents.youtube_agent import YouTubeDiscoveryAgent
 from app.agents.enrichment_agent import ArtistEnrichmentAgent
 from app.agents.lyrics_agent import LyricsAnalysisAgent
 from app.agents.storage_agent import StorageAgent
+from app.api.websocket import (
+    notify_discovery_started, notify_discovery_progress, 
+    notify_discovery_completed, notify_artist_discovered
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +76,12 @@ class DiscoveryOrchestrator:
         # Store session
         await self.storage_agent.create_discovery_session(deps, session_data)
         
+        # Notify clients that discovery started
+        await notify_discovery_started(str(session_id), {
+            "search_query": request.search_query,
+            "max_results": request.max_results
+        })
+        
         # Start discovery in background
         background_tasks.add_task(
             self._run_discovery_pipeline,
@@ -93,31 +103,93 @@ class DiscoveryOrchestrator:
         try:
             logger.info(f"Starting discovery pipeline for session {session_id}")
             
+            # Notify start of YouTube discovery phase
+            await notify_discovery_progress(str(session_id), {
+                "phase": "youtube_discovery",
+                "message": f"🔍 Searching YouTube for '{request.search_query}'...",
+                "progress": 10
+            })
+            
             # Phase 1: YouTube Discovery
             discovered_channels = await self._discover_youtube_artists(
-                deps, request.search_query, request.max_results
+                deps, request.search_query, request.max_results, session_id
             )
             
             logger.info(f"Discovered {len(discovered_channels)} potential artists")
             
+            await notify_discovery_progress(str(session_id), {
+                "phase": "youtube_discovery_complete",
+                "message": f"✅ Found {len(discovered_channels)} potential artists on YouTube",
+                "progress": 25,
+                "artists_found": len(discovered_channels)
+            })
+            
             # Phase 2: Process each artist
             enriched_artists = []
-            for channel_data in discovered_channels:
+            total_artists = len(discovered_channels)
+            
+            await notify_discovery_progress(str(session_id), {
+                "phase": "artist_processing",
+                "message": f"🎤 Processing {total_artists} artists through enrichment pipeline...",
+                "progress": 30
+            })
+            
+            for i, channel_data in enumerate(discovered_channels, 1):
                 try:
+                    artist_name = channel_data.get('channel_title', 'Unknown Artist')
+                    
+                    # Notify start of artist processing
+                    await notify_discovery_progress(str(session_id), {
+                        "phase": "processing_artist",
+                        "message": f"🔍 Processing artist {i}/{total_artists}: {artist_name}",
+                        "progress": 30 + (i / total_artists) * 50,
+                        "current_artist": artist_name
+                    })
+                    
                     enriched_artist = await self._process_artist(
                         deps, channel_data, session_id
                     )
                     if enriched_artist:
                         enriched_artists.append(enriched_artist)
                         
+                        # Notify successful artist processing
+                        await notify_artist_discovered({
+                            "name": artist_name,
+                            "enrichment_score": enriched_artist.enrichment_score,
+                            "session_id": str(session_id)
+                        })
+                        
+                        await notify_discovery_progress(str(session_id), {
+                            "phase": "artist_processed",
+                            "message": f"✅ Successfully processed: {artist_name}",
+                            "progress": 30 + (i / total_artists) * 50,
+                            "enriched_count": len(enriched_artists)
+                        })
+                    else:
+                        await notify_discovery_progress(str(session_id), {
+                            "phase": "artist_skipped",
+                            "message": f"⚠️ Skipped artist: {artist_name} (insufficient data)",
+                            "progress": 30 + (i / total_artists) * 50
+                        })
+                        
                 except Exception as e:
-                    logger.error(f"Error processing artist {channel_data['channel_title']}: {e}")
+                    error_msg = f"Error processing artist {channel_data.get('channel_title', 'Unknown')}: {str(e)}"
+                    logger.error(error_msg)
+                    
+                    await notify_discovery_progress(str(session_id), {
+                        "phase": "artist_error",
+                        "message": f"❌ Error processing {channel_data.get('channel_title', 'Unknown')}: {str(e)}",
+                        "progress": 30 + (i / total_artists) * 50,
+                        "error": str(e)
+                    })
                     continue
                     
                 # Small delay to respect rate limits
                 await asyncio.sleep(2)
                 
             # Update session status
+            total_videos = sum(len(a.videos) for a in enriched_artists) if enriched_artists else 0
+            
             await self.storage_agent.update_discovery_session(
                 deps,
                 str(session_id),
@@ -125,14 +197,31 @@ class DiscoveryOrchestrator:
                     "status": "completed",
                     "completed_at": datetime.now().isoformat(),
                     "artists_discovered": len(enriched_artists),
-                    "videos_processed": sum(len(a.videos) for a in enriched_artists)
+                    "videos_processed": total_videos
                 }
             )
+            
+            # Notify completion
+            await notify_discovery_completed(str(session_id), {
+                "artists_discovered": len(enriched_artists),
+                "videos_processed": total_videos,
+                "total_candidates": total_artists,
+                "success_rate": f"{(len(enriched_artists) / total_artists * 100):.1f}%" if total_artists > 0 else "0%"
+            })
             
             logger.info(f"Discovery session {session_id} completed. Found {len(enriched_artists)} artists")
             
         except Exception as e:
             logger.error(f"Discovery pipeline error: {e}")
+            
+            # Notify failure
+            await notify_discovery_progress(str(session_id), {
+                "phase": "pipeline_error",
+                "message": f"💥 Discovery pipeline failed: {str(e)}",
+                "progress": 0,
+                "error": str(e)
+            })
+            
             await self.storage_agent.update_discovery_session(
                 deps,
                 str(session_id),
@@ -147,7 +236,8 @@ class DiscoveryOrchestrator:
         self,
         deps: PipelineDependencies,
         query: str,
-        max_results: int
+        max_results: int,
+        session_id: UUID
     ) -> List[Dict[str, Any]]:
         """Discover artists on YouTube"""
         

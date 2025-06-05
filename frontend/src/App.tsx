@@ -67,30 +67,84 @@ function App() {
     const { type, session_id, details, progress, summary } = message;
     
     switch (type) {
+      case 'connection':
+        addLog('🔗 WebSocket connected - Real-time updates enabled');
+        break;
+        
       case 'discovery_started':
-        addLog(`🚀 Discovery session ${session_id} started`);
+        addLog(`🚀 Discovery session started: ${session_id}`);
+        addLog(`🔍 Search query: "${details?.search_query || 'unknown'}" (max ${details?.max_results || 0} results)`);
         setCurrentSessionId(session_id);
         fetchSessions();
         break;
         
       case 'discovery_progress':
-        addLog(`⚡ Progress: ${progress.phase} - ${progress.message || 'Processing...'}`);
+        if (progress?.message) {
+          addLog(progress.message);
+        }
+        
+        // Update discovery status with progress
+        if (progress?.progress !== undefined) {
+          setDiscoveryStatus(`${progress.message} (${Math.round(progress.progress)}%)`);
+        }
+        
+        // Handle specific progress phases
+        switch (progress?.phase) {
+          case 'youtube_discovery':
+            addLog(`🔍 Searching YouTube...`);
+            break;
+          case 'youtube_discovery_complete':
+            addLog(`✅ Found ${progress.artists_found || 0} potential artists`);
+            break;
+          case 'artist_processing':
+            addLog(`🎤 Starting artist enrichment pipeline...`);
+            break;
+          case 'processing_artist':
+            if (progress.current_artist) {
+              addLog(`🔍 Processing: ${progress.current_artist}`);
+            }
+            break;
+          case 'artist_processed':
+            if (progress.enriched_count) {
+              addLog(`✅ Successfully enriched ${progress.enriched_count} artists so far`);
+            }
+            break;
+          case 'artist_skipped':
+            addLog(`⚠️ Skipped artist (insufficient data)`);
+            break;
+          case 'artist_error':
+            addLog(`❌ Error: ${progress.error || 'Unknown error'}`);
+            break;
+          case 'pipeline_error':
+            addLog(`💥 Pipeline failed: ${progress.error || 'Unknown error'}`);
+            setIsDiscovering(false);
+            break;
+        }
         break;
         
       case 'discovery_completed':
-        addLog(`✅ Discovery completed: ${summary.artists_discovered} artists found`);
+        const { artists_discovered, videos_processed, total_candidates, success_rate } = summary || {};
+        addLog(`🎉 Discovery completed!`);
+        addLog(`📊 Results: ${artists_discovered || 0} artists enriched from ${total_candidates || 0} candidates`);
+        addLog(`📹 ${videos_processed || 0} videos processed | Success rate: ${success_rate || '0%'}`);
+        
         setIsDiscovering(false);
+        setDiscoveryStatus(`Discovery completed: ${artists_discovered || 0} artists found`);
         fetchSessions();
         fetchArtists();
         fetchAnalytics();
         break;
         
-      case 'artist_processed':
-        addLog(`👤 Artist processed: ${details.artist_name}`);
+      case 'artist_discovered':
+        if (details?.name) {
+          addLog(`🎤 New artist discovered: ${details.name} (score: ${details.enrichment_score?.toFixed(2) || 'N/A'})`);
+          // Trigger a refresh of artists list
+          fetchArtists();
+        }
         break;
         
       default:
-        addLog(`📨 ${type}: ${message.timestamp}`);
+        addLog(`📨 ${type}: ${JSON.stringify(message).substring(0, 100)}...`);
     }
   };
 
@@ -358,20 +412,71 @@ function App() {
           </div>
         </div>
 
-        {/* Logs Section */}
+        {/* Enhanced Live Activity Stream */}
         <div className="mb-8 bg-white rounded-lg shadow">
           <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-xl font-semibold">Live Activity Logs</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold">🚀 Live Discovery Stream</h2>
+              <div className="flex items-center space-x-4">
+                <div className={`flex items-center space-x-2 ${wsConnected ? 'text-green-600' : 'text-red-600'}`}>
+                  <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+                  <span className="text-sm font-medium">
+                    {wsConnected ? 'Live' : 'Disconnected'}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setLogs([])}
+                  className="text-sm px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                >
+                  Clear Logs
+                </button>
+              </div>
+            </div>
           </div>
           <div className="p-6">
-            <div className="bg-gray-900 text-green-400 font-mono text-sm p-4 rounded-lg h-64 overflow-y-auto">
+            {/* Progress indicator when discovering */}
+            {isDiscovering && (
+              <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center space-x-3">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-blue-900">Discovery in Progress</div>
+                    <div className="text-xs text-blue-700 mt-1">{discoveryStatus}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            <div className="bg-gray-900 text-green-400 font-mono text-sm p-4 rounded-lg h-80 overflow-y-auto">
               {logs.length === 0 ? (
-                <div className="text-gray-500">No logs yet...</div>
+                <div className="text-center py-8">
+                  <div className="text-gray-500">
+                    <div className="text-2xl mb-2">📡</div>
+                    <div>Waiting for activity...</div>
+                    <div className="text-xs mt-2">Real-time discovery logs will appear here</div>
+                  </div>
+                </div>
               ) : (
-                logs.map((log, index) => (
-                  <div key={index} className="mb-1">{log}</div>
-                ))
+                <div className="space-y-1">
+                  {logs.map((log, index) => (
+                    <div 
+                      key={index} 
+                      className={`transition-colors ${
+                        log.includes('❌') || log.includes('💥') ? 'text-red-400' :
+                        log.includes('✅') || log.includes('🎉') ? 'text-green-400' :
+                        log.includes('⚠️') ? 'text-yellow-400' :
+                        log.includes('🔍') || log.includes('🎤') ? 'text-cyan-400' :
+                        log.includes('📊') || log.includes('📹') ? 'text-purple-400' :
+                        'text-gray-300'
+                      }`}
+                    >
+                      {log}
+                    </div>
+                  ))}
+                </div>
               )}
+              {/* Auto-scroll anchor */}
+              <div ref={(el) => el?.scrollIntoView({ behavior: 'smooth' })} />
             </div>
           </div>
         </div>
