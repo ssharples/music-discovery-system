@@ -198,6 +198,9 @@ function App() {
   };
 
   const runDiscovery = async () => {
+    console.log('🚀 runDiscovery function called');
+    addLog('🚀 runDiscovery function called');
+    
     setIsDiscovering(true);
     setDiscoveryStatus('Starting discovery for "official music video"...');
     addLog('🚀 Starting discovery session...');
@@ -211,35 +214,46 @@ function App() {
       addLog(`📤 Sending discovery request: ${JSON.stringify(request)}`);
       console.log('🔍 About to send discovery request:', request);
       
+      console.log('📡 Calling apiClient.startDiscovery...');
       const response = await apiClient.startDiscovery(request);
       console.log('✅ Discovery response received:', response);
       setDiscoveryStatus(`Discovery started: ${response.message}`);
       setCurrentSessionId(response.session_id);
       addLog(`🚀 Discovery session started: ${response.session_id}`);
       
-      // Check progress every 10 seconds
-      const checkProgress = setInterval(async () => {
-        try {
-          await fetchArtists();
-          await fetchAnalytics();
-        } catch (error) {
-          addLog(`Progress check failed: ${error}`);
-        }
-      }, 10000);
+      // Only start progress checking if we have a session ID
+      if (response.session_id) {
+        // Check progress every 10 seconds
+        const checkProgress = setInterval(async () => {
+          try {
+            await fetchArtists();
+            await fetchAnalytics();
+          } catch (error) {
+            addLog(`Progress check failed: ${error}`);
+          }
+        }, 10000);
 
-      // Stop checking after 5 minutes
-      setTimeout(() => {
-        clearInterval(checkProgress);
+        // Stop checking after 5 minutes
+        setTimeout(() => {
+          clearInterval(checkProgress);
+          setIsDiscovering(false);
+          setDiscoveryStatus('Discovery session completed');
+          addLog('Discovery session completed');
+          fetchArtists();
+          fetchAnalytics();
+        }, 300000);
+      } else {
+        console.error('❌ No session ID received from discovery response');
+        addLog('❌ No session ID received from discovery response');
         setIsDiscovering(false);
-        setDiscoveryStatus('Discovery session completed');
-        addLog('Discovery session completed');
-        fetchArtists();
-        fetchAnalytics();
-      }, 300000);
+      }
 
     } catch (error) {
       console.error('❌ Discovery failed:', error);
       addLog(`❌ Discovery request failed: ${error}`);
+      
+      // Make sure to stop any intervals that might have started
+      setIsDiscovering(false);
       
       // Check if it's a network error
       if (error instanceof TypeError && error.message.includes('fetch')) {
@@ -248,8 +262,6 @@ function App() {
       } else {
         setDiscoveryStatus(`Discovery failed: ${error}`);
       }
-      
-      setIsDiscovering(false);
     }
   };
 
