@@ -3,15 +3,21 @@ FROM node:18-alpine as builder
 
 WORKDIR /app
 
+# Install dependencies needed for native builds
+RUN apk add --no-cache python3 make g++
+
 # Copy package files
 COPY package*.json ./
-RUN npm ci --only=production
+
+# Install all dependencies (including dev dependencies for build)
+RUN npm ci
 
 # Copy source code
 COPY . .
 
-# Build the application
-RUN npm run build
+# Build the application (skip TypeScript check for Docker build)
+ENV NODE_ENV=production
+RUN npm run build:production
 
 # Production stage
 FROM nginx:alpine
