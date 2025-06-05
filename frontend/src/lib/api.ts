@@ -74,26 +74,49 @@ export interface DiscoveryResponse {
 class ApiClient {
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
-    const response = await fetch(url, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
-      ...options,
-    });
+    console.log(`🌐 Making ${options?.method || 'GET'} request to: ${url}`);
+    
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'Content-Type': 'application/json',
+          ...options?.headers,
+        },
+        ...options,
+      });
 
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      console.log(`📈 Response status: ${response.status} ${response.statusText}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`❌ API Error Response: ${errorText}`);
+        throw new Error(`API Error: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+
+      const data = await response.json();
+      console.log(`✅ Response data:`, data);
+      return data;
+    } catch (error) {
+      console.error(`❌ Network/Parse Error:`, error);
+      throw error;
     }
-
-    return response.json();
   }
 
   async startDiscovery(request: DiscoveryRequest): Promise<DiscoveryResponse> {
-    return this.request<DiscoveryResponse>('/api/discover', {
-      method: 'POST',
-      body: JSON.stringify(request),
-    });
+    console.log('📡 API Client: Making discovery request to /api/discover');
+    console.log('📋 Request payload:', request);
+    
+    try {
+      const response = await this.request<DiscoveryResponse>('/api/discover', {
+        method: 'POST',
+        body: JSON.stringify(request),
+      });
+      console.log('✅ API Client: Discovery request successful');
+      return response;
+    } catch (error) {
+      console.error('❌ API Client: Discovery request failed:', error);
+      throw error;
+    }
   }
 
   async getDiscoverySessions(): Promise<any[]> {

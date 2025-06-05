@@ -200,7 +200,7 @@ function App() {
   const runDiscovery = async () => {
     setIsDiscovering(true);
     setDiscoveryStatus('Starting discovery for "official music video"...');
-    addLog('Starting discovery session');
+    addLog('🚀 Starting discovery session...');
 
     try {
       const request: DiscoveryRequest = {
@@ -208,7 +208,11 @@ function App() {
         max_results: 50
       };
 
+      addLog(`📤 Sending discovery request: ${JSON.stringify(request)}`);
+      console.log('🔍 About to send discovery request:', request);
+      
       const response = await apiClient.startDiscovery(request);
+      console.log('✅ Discovery response received:', response);
       setDiscoveryStatus(`Discovery started: ${response.message}`);
       setCurrentSessionId(response.session_id);
       addLog(`🚀 Discovery session started: ${response.session_id}`);
@@ -234,9 +238,17 @@ function App() {
       }, 300000);
 
     } catch (error) {
-      console.error('Discovery failed:', error);
-      setDiscoveryStatus(`Discovery failed: ${error}`);
-      addLog(`Discovery failed: ${error}`);
+      console.error('❌ Discovery failed:', error);
+      addLog(`❌ Discovery request failed: ${error}`);
+      
+      // Check if it's a network error
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        addLog('🌐 Network error - request may not be reaching backend');
+        setDiscoveryStatus('Network error - check backend connection');
+      } else {
+        setDiscoveryStatus(`Discovery failed: ${error}`);
+      }
+      
       setIsDiscovering(false);
     }
   };
