@@ -4,7 +4,8 @@ const API_BASE_URL = '';
 // Helper function to get the appropriate WebSocket URL
 export const getWebSocketUrl = () => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/ws`;
+  const clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  return `${protocol}//${window.location.host}/ws/${clientId}`;
 };
 
 export interface Artist {
