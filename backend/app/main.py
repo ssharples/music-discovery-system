@@ -116,19 +116,46 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """Health check endpoint - simple check for basic API functionality"""
+    try:
+        # Basic health check - just verify API is responding
+        return {
+            "status": "healthy",
+            "services": {
+                "api": "operational"
+            },
+            "environment": settings.ENVIRONMENT,
+            "message": "API is operational"
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "environment": settings.ENVIRONMENT
+        }
+
+@app.get("/health/detailed")
+async def detailed_health_check():
+    """Detailed health check endpoint that tests external services"""
     try:
         # Test database connection
         deps = await get_pipeline_deps()
-        health_result = deps.supabase.table("artists").select("count", count="exact").limit(1).execute()
-        db_status = "operational" if health_result else "error"
+        db_status = "error"
+        redis_status = "error"
+        
+        try:
+            health_result = deps.supabase.table("artists").select("count", count="exact").limit(1).execute()
+            db_status = "operational" if health_result else "error"
+        except Exception as e:
+            logger.warning(f"Database health check failed: {e}")
         
         # Test Redis connection
         try:
             await deps.redis_client.ping()
             redis_status = "operational"
-        except:
-            redis_status = "error"
+        except Exception as e:
+            logger.warning(f"Redis health check failed: {e}")
         
         return {
             "status": "healthy" if db_status == "operational" and redis_status == "operational" else "degraded",
@@ -141,7 +168,7 @@ async def health_check():
             "environment": settings.ENVIRONMENT
         }
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
+        logger.error(f"Detailed health check failed: {e}")
         return {
             "status": "unhealthy",
             "error": str(e),

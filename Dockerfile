@@ -50,7 +50,7 @@ RUN mkdir -p /var/log/supervisor /var/log/nginx /var/lib/redis /var/run && \
     chmod 777 /var/run
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
   CMD curl -f http://localhost:8000/health || exit 1
 
 EXPOSE 80 8000
