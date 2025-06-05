@@ -9,4 +9,5 @@ httpx
 python-multipart
 youtube-transcript-api
 beautifulsoup4
-python-dotenv 
+python-dotenv
+sentry-sdk[fastapi] 

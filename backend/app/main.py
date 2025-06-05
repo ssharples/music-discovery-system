@@ -4,9 +4,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import asyncio
 import logging
-import sentry_sdk
-from sentry_sdk.integrations.fastapi import FastApiIntegration
-from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+try:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+    SENTRY_AVAILABLE = True
+except ImportError:
+    SENTRY_AVAILABLE = False
 
 from app.core.config import settings
 from app.core.dependencies import get_pipeline_deps, cleanup_dependencies
@@ -21,7 +25,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Initialize Sentry for error tracking in production
-if settings.SENTRY_DSN and settings.ENVIRONMENT == "production":
+if SENTRY_AVAILABLE and settings.SENTRY_DSN and settings.ENVIRONMENT == "production":
     sentry_sdk.init(
         dsn=settings.SENTRY_DSN,
         integrations=[
@@ -31,6 +35,9 @@ if settings.SENTRY_DSN and settings.ENVIRONMENT == "production":
         traces_sample_rate=0.1,
         environment=settings.ENVIRONMENT,
     )
+    logger.info("Sentry error tracking initialized")
+elif settings.SENTRY_DSN and settings.ENVIRONMENT == "production":
+    logger.warning("Sentry SDK not available, error tracking disabled")
 
 # Background task queue
 background_tasks_queue = asyncio.Queue()
