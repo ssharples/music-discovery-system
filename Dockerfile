@@ -2,10 +2,10 @@
 # Build frontend
 FROM node:18-alpine as frontend-builder
 
-WORKDIR /app/frontend
+WORKDIR /app
 
 # Copy pre-built frontend
-COPY frontend/dist ./dist
+COPY frontend/dist ./frontend/dist
 
 # Build backend
 FROM python:3.11-slim
