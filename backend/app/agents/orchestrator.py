@@ -47,10 +47,12 @@ class DiscoveryOrchestrator:
     """Main orchestrator for the discovery pipeline"""
     
     def __init__(self):
-        self.youtube_agent = YouTubeDiscoveryAgent()
-        self.enrichment_agent = ArtistEnrichmentAgent()
-        self.lyrics_agent = LyricsAnalysisAgent()
+        # Temporarily commenting out agent initialization to test for blocking issues
+        # self.youtube_agent = YouTubeDiscoveryAgent()
+        # self.enrichment_agent = ArtistEnrichmentAgent()
+        # self.lyrics_agent = LyricsAnalysisAgent()
         self.storage_agent = StorageAgent()
+        logger.info("🧪 TESTING: Orchestrator initialized with minimal agents only")
         
     async def start_discovery_session(
         self,
@@ -159,11 +161,13 @@ class DiscoveryOrchestrator:
             logger.info(f"⚡ About to start main pipeline logic")
             logger.info(f"Starting discovery pipeline for session {session_id}")
             
-            # Phase 1: YouTube Discovery
+            # Phase 1: YouTube Discovery - TEMPORARILY DISABLED FOR TESTING
+            logger.info(f"🧪 TESTING: Skipping YouTube discovery to test pipeline execution")
             logger.info(f"About to call YouTube discovery with query: {request.search_query}")
-            discovered_channels = await self._discover_youtube_artists(
-                deps, request.search_query, request.max_results, session_id
-            )
+            # discovered_channels = await self._discover_youtube_artists(
+            #     deps, request.search_query, request.max_results, session_id
+            # )
+            discovered_channels = []  # Empty for testing
             
             logger.info(f"Discovered {len(discovered_channels)} potential artists")
             if discovered_channels:
@@ -176,6 +180,12 @@ class DiscoveryOrchestrator:
             total_artists = len(discovered_channels)
             
             logger.info(f"Starting to process {total_artists} discovered channels")
+            
+            # TESTING: Since we're using empty channels list, skip to completion
+            if total_artists == 0:
+                logger.info("🧪 TESTING: No channels to process - jumping to completion")
+                await asyncio.sleep(1)  # Small delay to simulate work
+                logger.info("🧪 TESTING: Pipeline test completed successfully!")
             
             for i, channel_data in enumerate(discovered_channels, 1):
                 try:
