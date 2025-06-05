@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for Coolify deployment
 # Build frontend
-FROM node:18-alpine as frontend-builder
+FROM node:18-alpine AS frontend-builder
 
 WORKDIR /app
 

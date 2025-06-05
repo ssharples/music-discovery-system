@@ -27,7 +27,7 @@ backend/app/__pycache__
 **/*.pyc
 
 # Build outputs
-frontend/dist
+# frontend/dist  # Need this for deployment
 frontend/build
 backend/build
 
