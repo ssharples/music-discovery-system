@@ -21,19 +21,25 @@ async def start_discovery(
     deps: PipelineDependencies = Depends(get_pipeline_deps)
 ):
     """Start a new discovery session"""
+    logger.info(f"🚀 Discovery request received: query='{request.search_query}', max_results={request.max_results}")
+    
     try:
+        logger.info("Creating DiscoveryOrchestrator instance...")
         orchestrator = DiscoveryOrchestrator()
+        
+        logger.info("Starting discovery session...")
         session_id = await orchestrator.start_discovery_session(
             request, deps, background_tasks
         )
         
+        logger.info(f"✅ Discovery session created successfully: {session_id}")
         return DiscoveryResponse(
             session_id=session_id,
             status="started",
             message="Discovery session started successfully"
         )
     except Exception as e:
-        logger.error(f"Error starting discovery: {e}")
+        logger.error(f"❌ Error starting discovery: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/artists", response_model=List[ArtistProfile])

@@ -60,8 +60,12 @@ class DiscoveryOrchestrator:
     ) -> UUID:
         """Start a new discovery session"""
         
+        logger.info("📋 Orchestrator.start_discovery_session called")
+        
         # Create session in database
         session_id = uuid4()
+        logger.info(f"🆔 Generated session ID: {session_id}")
+        
         session_data = {
             "id": str(session_id),
             "started_at": datetime.now().isoformat(),
@@ -74,6 +78,7 @@ class DiscoveryOrchestrator:
         }
         
         # Store session
+        logger.info("💾 Storing session in database...")
         await self.storage_agent.create_discovery_session(deps, session_data)
         
         # Notify clients that discovery started
@@ -83,12 +88,14 @@ class DiscoveryOrchestrator:
         })
         
         # Start discovery in background
+        logger.info("🏃 Adding discovery pipeline to background tasks...")
         background_tasks.add_task(
             self._run_discovery_pipeline,
             session_id,
             request,
             deps
         )
+        logger.info("✅ Background task added successfully")
         
         return session_id
         
@@ -100,26 +107,11 @@ class DiscoveryOrchestrator:
     ):
         """Run the complete discovery pipeline"""
         
+        logger.info(f"🚀 PIPELINE ENTRY: _run_discovery_pipeline called for session {session_id}")
+        logger.info(f"📋 Request details: query='{request.search_query}', max_results={request.max_results}")
+        
         try:
             logger.info(f"Starting discovery pipeline for session {session_id}")
-            
-            # Test WebSocket notification first
-            try:
-                await notify_discovery_progress(str(session_id), {
-                    "phase": "pipeline_started",
-                    "message": f"🚀 Discovery pipeline starting for session {session_id}",
-                    "progress": 5
-                })
-                logger.info("WebSocket notification sent successfully")
-            except Exception as ws_error:
-                logger.error(f"WebSocket notification failed: {ws_error}")
-            
-            # Notify start of YouTube discovery phase
-            await notify_discovery_progress(str(session_id), {
-                "phase": "youtube_discovery",
-                "message": f"🔍 Searching YouTube for '{request.search_query}'...",
-                "progress": 10
-            })
             
             # Phase 1: YouTube Discovery
             logger.info(f"About to call YouTube discovery with query: {request.search_query}")
@@ -128,36 +120,21 @@ class DiscoveryOrchestrator:
             )
             
             logger.info(f"Discovered {len(discovered_channels)} potential artists")
-            logger.info(f"Channel data preview: {discovered_channels[:2] if discovered_channels else 'No channels'}")
-            
-            await notify_discovery_progress(str(session_id), {
-                "phase": "youtube_discovery_complete",
-                "message": f"✅ Found {len(discovered_channels)} potential artists on YouTube",
-                "progress": 25,
-                "artists_found": len(discovered_channels)
-            })
+            if discovered_channels:
+                logger.info(f"Sample channels: {[c.get('channel_title', 'Unknown') for c in discovered_channels[:3]]}")
+            else:
+                logger.warning("No channels discovered from YouTube search")
             
             # Phase 2: Process each artist
             enriched_artists = []
             total_artists = len(discovered_channels)
             
-            await notify_discovery_progress(str(session_id), {
-                "phase": "artist_processing",
-                "message": f"🎤 Processing {total_artists} artists through enrichment pipeline...",
-                "progress": 30
-            })
+            logger.info(f"Starting to process {total_artists} discovered channels")
             
             for i, channel_data in enumerate(discovered_channels, 1):
                 try:
                     artist_name = channel_data.get('channel_title', 'Unknown Artist')
-                    
-                    # Notify start of artist processing
-                    await notify_discovery_progress(str(session_id), {
-                        "phase": "processing_artist",
-                        "message": f"🔍 Processing artist {i}/{total_artists}: {artist_name}",
-                        "progress": 30 + (i / total_artists) * 50,
-                        "current_artist": artist_name
-                    })
+                    logger.info(f"Processing artist {i}/{total_artists}: {artist_name}")
                     
                     enriched_artist = await self._process_artist(
                         deps, channel_data, session_id
@@ -254,50 +231,27 @@ class DiscoveryOrchestrator:
     ) -> List[Dict[str, Any]]:
         """Discover artists on YouTube"""
         
-        try:
-            logger.info(f"Starting YouTube discovery for session {session_id}")
+        logger.info(f"Starting YouTube discovery for session {session_id}")
+        
+        # Check API quota
+        quota_available = await self._check_youtube_quota(deps)
+        logger.info(f"YouTube quota available: {quota_available}")
+        
+        if quota_available < 100:
+            logger.warning(f"Low YouTube quota: {quota_available}")
+            max_results = min(max_results, 10)
             
-            # Check API quota
-            quota_available = await self._check_youtube_quota(deps)
-            logger.info(f"YouTube quota available: {quota_available}")
-            
-            if quota_available < 100:
-                logger.warning(f"Low YouTube quota: {quota_available}")
-                await notify_discovery_progress(str(session_id), {
-                    "phase": "quota_warning",
-                    "message": f"⚠️ Low YouTube quota: {quota_available} requests remaining",
-                    "progress": 15
-                })
-                max_results = min(max_results, 10)
-                
-            # Notify quota check complete
-            await notify_discovery_progress(str(session_id), {
-                "phase": "quota_checked",
-                "message": f"✅ API quota OK: {quota_available} requests available",
-                "progress": 20
-            })
-            
-            # Discover artists
-            logger.info(f"Calling YouTube agent with query: '{query}', max_results: {max_results}")
-            channels = await self.youtube_agent.discover_artists(
-                deps, query, max_results
-            )
-            logger.info(f"YouTube agent returned {len(channels)} channels")
-            
-            # Update quota usage
-            await self._update_api_usage(deps, "youtube", len(channels) * 2)
-            
-            return channels
-            
-        except Exception as e:
-            logger.error(f"YouTube discovery failed: {e}")
-            await notify_discovery_progress(str(session_id), {
-                "phase": "youtube_error",
-                "message": f"❌ YouTube discovery failed: {str(e)}",
-                "progress": 0,
-                "error": str(e)
-            })
-            return []
+        # Discover artists
+        logger.info(f"Calling YouTube agent with query: '{query}', max_results: {max_results}")
+        channels = await self.youtube_agent.discover_artists(
+            deps, query, max_results
+        )
+        logger.info(f"YouTube agent returned {len(channels)} channels")
+        
+        # Update quota usage
+        await self._update_api_usage(deps, "youtube", len(channels) * 2)
+        
+        return channels
         
     async def _process_artist(
         self,
