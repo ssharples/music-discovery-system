@@ -11,4 +11,6 @@ python-multipart
 youtube-transcript-api
 beautifulsoup4
 python-dotenv
-sentry-sdk[fastapi] 
+sentry-sdk[fastapi]
+google-api-python-client
+spotipy 
