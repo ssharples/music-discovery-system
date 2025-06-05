@@ -241,6 +241,7 @@ class YouTubeDiscoveryAgent:
     
     def __init__(self):
         self.agent = youtube_agent
+        logger.info("YouTubeDiscoveryAgent initialized")
         
     async def discover_artists(
         self,
@@ -250,12 +251,17 @@ class YouTubeDiscoveryAgent:
     ) -> List[Dict[str, Any]]:
         """Discover new music artists on YouTube"""
         
+        logger.info(f"🎵 YouTubeDiscoveryAgent.discover_artists called with query='{query}', max_results={max_results}")
+        
         # Call YouTube search directly - bypassing pydantic-ai agent
         try:
+            logger.info("🔧 Building YouTube API client...")
             youtube = build('youtube', 'v3', developerKey=deps.youtube_api_key)
+            logger.info("✅ YouTube API client built successfully")
             
             # Default to videos from last 7 days
             published_after = datetime.now() - timedelta(days=7)
+            logger.info(f"📅 Search period: videos after {published_after}")
             
             # Convert to UTC timezone-aware datetime if needed
             if published_after.tzinfo is None:
@@ -265,7 +271,9 @@ class YouTubeDiscoveryAgent:
                 
             # Format as RFC 3339 UTC timestamp
             published_after_str = published_after.strftime('%Y-%m-%dT%H:%M:%SZ')
+            logger.info(f"⏰ Formatted timestamp: {published_after_str}")
                 
+            logger.info("🔍 Making YouTube search request...")
             search_request = youtube.search().list(
                 q=query,
                 part='id,snippet',
@@ -279,8 +287,10 @@ class YouTubeDiscoveryAgent:
             )
             
             search_response = search_request.execute()
+            logger.info(f"✅ YouTube search completed. Found {len(search_response.get('items', []))} videos")
             
             video_ids = [item['id']['videoId'] for item in search_response['items']]
+            logger.info(f"📋 Extracted {len(video_ids)} video IDs")
             
             # Get video statistics
             videos = []
