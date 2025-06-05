@@ -1,5 +1,11 @@
-// API Configuration
-const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
+// API Configuration - Use relative URLs since nginx proxies to backend
+const API_BASE_URL = '';
+
+// Helper function to get the appropriate WebSocket URL
+export const getWebSocketUrl = () => {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/ws`;
+};
 
 export interface Artist {
   id: string;
@@ -89,6 +95,18 @@ class ApiClient {
     });
   }
 
+  async getDiscoverySessions(): Promise<any[]> {
+    return this.request<any[]>('/api/sessions');
+  }
+
+  async getSessionDetails(sessionId: string): Promise<any> {
+    return this.request<any>(`/api/session/${sessionId}`);
+  }
+
+  async getApiQuota(): Promise<any> {
+    return this.request<any>('/api/analytics/quota');
+  }
+
   async getArtists(params?: {
     skip?: number;
     limit?: number;
@@ -129,3 +147,6 @@ class ApiClient {
 
 // Export singleton instance
 export const apiClient = new ApiClient();
+
+// Also export as default for backwards compatibility
+export default apiClient;

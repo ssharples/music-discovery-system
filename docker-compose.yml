@@ -2,14 +2,14 @@
 version: '3.8'
 
 services:
-  # Backend API
+  # Backend Service
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    build: .
     ports:
       - "8000:8000"
     environment:
+      - ENVIRONMENT=production
+      - DEBUG=false
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
       - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
       - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
@@ -17,53 +17,43 @@ services:
       - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_KEY=${SUPABASE_KEY}
-      - REDIS_URL=redis://redis:6379
       - SECRET_KEY=${SECRET_KEY}
-    depends_on:
-      - redis
-    volumes:
-      - ./backend/app:/app/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://frontend,https://musicagent.alluristdesign.dev}
+      - SENTRY_DSN=${SENTRY_DSN}
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    working_dir: /app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - music-discovery
+    labels:
+      - "coolify.managed=true"
 
-  # Frontend
+  # Frontend Service
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    build: ./frontend
     ports:
       - "3000:80"
-    environment:
-      - VITE_API_URL=http://localhost:8000
-      - VITE_WS_URL=ws://localhost:8000
+    restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - music-discovery
+    labels:
+      - "coolify.managed=true"
 
-  # Redis for caching and queue
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-
-  # Celery worker (optional for background tasks)
-  celery:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    command: celery -A app.celery worker --loglevel=info
-    environment:
-      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
-      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
-      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_KEY=${SUPABASE_KEY}
-      - REDIS_URL=redis://redis:6379
-      - SECRET_KEY=${SECRET_KEY}
-    depends_on:
-      - redis
-
-volumes:
-  redis_data:
+networks:
+  music-discovery:
+    driver: bridge

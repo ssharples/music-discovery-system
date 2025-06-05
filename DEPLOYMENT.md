@@ -220,4 +220,79 @@ For deployment issues:
 - [Docker Documentation](https://docs.docker.com/)
 - [Supabase Documentation](https://supabase.com/docs)
 - [FastAPI Deployment](https://fastapi.tiangolo.com/deployment/)
-- [React Deployment](https://create-react-app.dev/docs/deployment/) 
+- [React Deployment](https://create-react-app.dev/docs/deployment/)
+
+# Music Discovery System - Full Stack Deployment
+
+## Overview
+This deployment includes both the backend AI orchestrator and the frontend admin dashboard in a single Docker Compose stack.
+
+## Architecture
+- **Backend**: FastAPI application with multi-agent AI pipeline (port 8000)
+- **Frontend**: React admin dashboard with nginx proxy (port 3000)
+- **Network**: Both services communicate via internal Docker network
+- **Proxy**: Frontend nginx proxies API and WebSocket requests to backend
+
+## Deployment to Coolify VPS
+
+### 1. Environment Variables
+Ensure these environment variables are set in Coolify:
+
+```bash
+YOUTUBE_API_KEY=your_youtube_api_key
+SPOTIFY_CLIENT_ID=your_spotify_client_id
+SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
+DEEPSEEK_API_KEY=your_deepseek_api_key
+FIRECRAWL_API_KEY=your_firecrawl_api_key
+SUPABASE_URL=your_supabase_url
+SUPABASE_KEY=your_supabase_key
+SECRET_KEY=your_secret_key
+ALLOWED_ORIGINS=https://your-domain.com
+SENTRY_DSN=your_sentry_dsn
+```
+
+### 2. Deploy with Docker Compose
+Use the main `docker-compose.yml` file:
+
+```bash
+docker-compose up -d
+```
+
+### 3. Access Points
+- **Frontend Dashboard**: http://your-domain:3000
+- **Backend API**: http://your-domain:8000 (or proxied through frontend)
+- **Health Check**: http://your-domain:3000/health
+
+### 4. Service Communication
+- Frontend serves on port 3000 with nginx
+- Backend serves on port 8000 with FastAPI
+- Nginx proxies `/api/*` and `/ws` requests to backend
+- WebSocket connections handled at `/ws` endpoint
+
+### 5. Features Available
+- **Real-time Dashboard**: Live orchestrator monitoring
+- **WebSocket Integration**: Real-time pipeline updates
+- **Discovery Control**: One-click "official music video" search
+- **System Analytics**: API usage, artist counts, session history
+- **Live Logs**: Real-time activity feed with pipeline phases
+
+### 6. Monitoring
+Both services include health checks:
+- Backend: `curl -f http://localhost:8000/health`
+- Frontend: `curl -f http://localhost:80`
+
+### 7. Troubleshooting
+- Check container logs: `docker-compose logs -f [service_name]`
+- Verify network connectivity: `docker network ls`
+- Test backend directly: `curl http://localhost:8000/health`
+- Test frontend: `curl http://localhost:3000/health`
+
+## Development vs Production
+- **Development**: Use `docker-compose.backend-only.yml` for backend only
+- **Production**: Use `docker-compose.yml` for full stack deployment
+
+## Coolify Configuration
+- Set up environment variables in Coolify dashboard
+- Point to `docker-compose.yml` as the compose file
+- Configure domain routing to port 3000 for frontend access
+- Backend will be accessible internally via service name `backend:8000` 
