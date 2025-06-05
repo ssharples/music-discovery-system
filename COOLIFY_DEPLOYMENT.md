@@ -118,12 +118,21 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 
 ## ⚠️ **Port Conflict Resolution**
 
-**If your Coolify dashboard uses port 8000:**
-- Use `docker-compose.coolify-alt.yml` instead
+**Port 80 Conflict** (most common):
+- Use `docker-compose.coolify.yml` (port 8080)
 - Your app will be accessible on:
-  - **Frontend**: Port 80 (standard web traffic)
-  - **API**: Port 3001 (instead of 8000)
-  - **Health check**: `http://yourdomain.com/health`
+  - **Frontend**: `http://yourserver:8080`
+  - **API**: `http://yourserver:3001`
+
+**Port 8080 Also Taken:**
+- Use `docker-compose.coolify-port3000.yml` instead
+- Your app will be accessible on:
+  - **Frontend**: `http://yourserver:3000`
+  - **API**: `http://yourserver:3001`
+
+**Original Port 8000 Conflict:**
+- Use `docker-compose.coolify-alt.yml`
+- **API**: Port 3001 (instead of 8000)
 
 **No changes needed to your application code** - only the external port mapping changes.
 

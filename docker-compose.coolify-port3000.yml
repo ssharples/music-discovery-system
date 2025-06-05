@@ -4,7 +4,7 @@ services:
   app:
     build: .
     ports:
-      - "8080:80"
+      - "3000:80"
       - "3001:8000"
     environment:
       - ENVIRONMENT=production
