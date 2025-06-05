@@ -129,9 +129,21 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 
 ## 🔧 Configuration Details
 
+### Dockerfile Options
+
+There are two Dockerfile options available:
+
+1. **`Dockerfile`** - Multi-stage build (recommended)
+   - More efficient, smaller image size
+   - Builds frontend in separate stage
+
+2. **`Dockerfile.coolify`** - Single-stage build (fallback)
+   - Simpler, more reliable for some environments
+   - Use if multi-stage build fails
+
 ### Dockerfile Architecture
 The deployment uses a multi-stage build:
-- **Stage 1**: Builds React frontend
+- **Stage 1**: Prepares frontend assets
 - **Stage 2**: Sets up Python backend + Nginx + Redis
 - **Supervisor**: Manages all processes
 
@@ -156,6 +168,16 @@ The deployment uses a multi-stage build:
 - Missing environment variables
 - API key format issues
 - Network connectivity during build
+- Frontend dist directory not found
+```
+
+**Specific Error: "frontend/dist: not found"**
+```bash
+# This means the frontend/dist directory is missing
+# Solutions:
+1. Ensure frontend/dist/index.html is committed to git
+2. Try using Dockerfile.coolify instead of Dockerfile
+3. Check .gitignore doesn't exclude dist/ directory
 ```
 
 #### ❌ Application Won't Start
