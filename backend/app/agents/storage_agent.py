@@ -172,7 +172,9 @@ class StorageAgent:
             return result.data or []
         except Exception as e:
             logger.error(f"Error searching artists: {e}")
-            return []_artist_profile(
+            return []
+            
+    async def store_artist_profile(
         self,
         deps: PipelineDependencies,
         artist: ArtistProfile
@@ -241,5 +243,3 @@ class StorageAgent:
         except Exception as e:
             logger.error(f"Error updating artist profile: {e}")
             return False
-            
-    async def store
