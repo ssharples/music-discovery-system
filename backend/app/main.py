@@ -7,7 +7,6 @@ import logging
 try:
     import sentry_sdk
     from sentry_sdk.integrations.fastapi import FastApiIntegration
-    from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
     SENTRY_AVAILABLE = True
 except ImportError:
     SENTRY_AVAILABLE = False
@@ -28,10 +27,7 @@ logger = logging.getLogger(__name__)
 if SENTRY_AVAILABLE and settings.SENTRY_DSN and settings.ENVIRONMENT == "production":
     sentry_sdk.init(
         dsn=settings.SENTRY_DSN,
-        integrations=[
-            FastApiIntegration(),
-            SqlalchemyIntegration(),
-        ],
+        integrations=[FastApiIntegration()],
         traces_sample_rate=0.1,
         environment=settings.ENVIRONMENT,
     )
