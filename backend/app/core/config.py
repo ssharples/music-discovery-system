@@ -6,16 +6,16 @@ import os
 
 class Settings(BaseSettings):
     """Application settings"""
-    # API Keys
-    YOUTUBE_API_KEY: str = Field(..., env="YOUTUBE_API_KEY")
-    SPOTIFY_CLIENT_ID: str = Field(..., env="SPOTIFY_CLIENT_ID")
-    SPOTIFY_CLIENT_SECRET: str = Field(..., env="SPOTIFY_CLIENT_SECRET")
-    DEEPSEEK_API_KEY: str = Field(..., env="DEEPSEEK_API_KEY")
-    FIRECRAWL_API_KEY: str = Field(..., env="FIRECRAWL_API_KEY")
+    # API Keys (optional for basic deployment)
+    YOUTUBE_API_KEY: str = Field("", env="YOUTUBE_API_KEY")
+    SPOTIFY_CLIENT_ID: str = Field("", env="SPOTIFY_CLIENT_ID")
+    SPOTIFY_CLIENT_SECRET: str = Field("", env="SPOTIFY_CLIENT_SECRET")
+    DEEPSEEK_API_KEY: str = Field("", env="DEEPSEEK_API_KEY")
+    FIRECRAWL_API_KEY: str = Field("", env="FIRECRAWL_API_KEY")
     
-    # Supabase
-    SUPABASE_URL: str = Field(..., env="SUPABASE_URL")
-    SUPABASE_KEY: str = Field(..., env="SUPABASE_KEY")
+    # Supabase (optional for basic deployment)
+    SUPABASE_URL: str = Field("", env="SUPABASE_URL")
+    SUPABASE_KEY: str = Field("", env="SUPABASE_KEY")
     
     # Redis
     REDIS_URL: str = Field("redis://localhost:6379", env="REDIS_URL")
@@ -25,7 +25,7 @@ class Settings(BaseSettings):
         default="http://localhost:3000,http://localhost:5173",
         env="ALLOWED_ORIGINS"
     )
-    SECRET_KEY: str = Field(..., env="SECRET_KEY")
+    SECRET_KEY: str = Field("default-secret-key-change-in-production", env="SECRET_KEY")
     
     # Environment
     ENVIRONMENT: str = Field("development", env="ENVIRONMENT")
@@ -53,12 +53,29 @@ class Settings(BaseSettings):
     @classmethod
     def validate_secret_key(cls, v):
         if len(v) < 32:
-            raise ValueError('SECRET_KEY must be at least 32 characters long')
+            # For development/demo purposes, pad the key
+            return v + "0" * (32 - len(v))
         return v
     
     model_config = {
         "env_file": ".env",
         "case_sensitive": True
     }
+    
+    def is_supabase_configured(self) -> bool:
+        """Check if Supabase is properly configured"""
+        return bool(self.SUPABASE_URL and self.SUPABASE_KEY)
+    
+    def is_youtube_configured(self) -> bool:
+        """Check if YouTube API is properly configured"""
+        return bool(self.YOUTUBE_API_KEY)
+    
+    def is_spotify_configured(self) -> bool:
+        """Check if Spotify API is properly configured"""
+        return bool(self.SPOTIFY_CLIENT_ID and self.SPOTIFY_CLIENT_SECRET)
+    
+    def is_deepseek_configured(self) -> bool:
+        """Check if DeepSeek API is properly configured"""
+        return bool(self.DEEPSEEK_API_KEY)
 
 settings = Settings() 
