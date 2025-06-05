@@ -88,15 +88,17 @@ class DiscoveryOrchestrator:
         })
         
         # Start discovery in background
-        logger.info("🏃 Starting discovery pipeline as asyncio task...")
+        logger.info("🏃 Adding discovery pipeline to background tasks...")
         try:
-            task = asyncio.create_task(
-                self._run_discovery_pipeline_with_error_handling(session_id, request, deps)
+            background_tasks.add_task(
+                self._run_discovery_pipeline_with_error_handling,
+                session_id,
+                request,
+                deps
             )
-            logger.info("✅ Asyncio task created successfully")
-            logger.info(f"🔍 Task state: {task.done()}, cancelled: {task.cancelled()}")
+            logger.info("✅ Background task added successfully")
         except Exception as e:
-            logger.error(f"❌ Failed to create asyncio task: {e}")
+            logger.error(f"❌ Failed to add background task: {e}")
             raise
         
         return session_id

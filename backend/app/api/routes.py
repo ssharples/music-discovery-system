@@ -22,22 +22,29 @@ async def start_discovery(
 ):
     """Start a new discovery session"""
     logger.info(f"🚀 Discovery request received: query='{request.search_query}', max_results={request.max_results}")
+    logger.info(f"🔍 Request object: {request}")
+    logger.info(f"🔍 Dependencies: {deps}")
+    logger.info(f"🔍 Background tasks: {background_tasks}")
     
     try:
-        logger.info("Creating DiscoveryOrchestrator instance...")
+        logger.info("⚡ About to create DiscoveryOrchestrator instance...")
         orchestrator = DiscoveryOrchestrator()
+        logger.info("✅ DiscoveryOrchestrator created successfully")
         
-        logger.info("Starting discovery session...")
+        logger.info("⚡ About to start discovery session...")
         session_id = await orchestrator.start_discovery_session(
             request, deps, background_tasks
         )
-        
         logger.info(f"✅ Discovery session created successfully: {session_id}")
-        return DiscoveryResponse(
+        
+        logger.info("⚡ About to return response...")
+        response = DiscoveryResponse(
             session_id=session_id,
             status="started",
             message="Discovery session started successfully"
         )
+        logger.info(f"✅ Response created: {response}")
+        return response
     except Exception as e:
         logger.error(f"❌ Error starting discovery: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
