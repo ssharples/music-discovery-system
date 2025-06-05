@@ -89,12 +89,51 @@ class DiscoveryOrchestrator:
         
         # Start discovery in background
         logger.info("🏃 Starting discovery pipeline as asyncio task...")
-        asyncio.create_task(
-            self._run_discovery_pipeline(session_id, request, deps)
-        )
-        logger.info("✅ Asyncio task created successfully")
+        try:
+            task = asyncio.create_task(
+                self._run_discovery_pipeline_with_error_handling(session_id, request, deps)
+            )
+            logger.info("✅ Asyncio task created successfully")
+            logger.info(f"🔍 Task state: {task.done()}, cancelled: {task.cancelled()}")
+        except Exception as e:
+            logger.error(f"❌ Failed to create asyncio task: {e}")
+            raise
         
         return session_id
+        
+    async def _run_discovery_pipeline_with_error_handling(
+        self,
+        session_id: UUID,
+        request: DiscoveryRequest,
+        deps: PipelineDependencies
+    ):
+        """Wrapper with comprehensive error handling"""
+        logger.info(f"🛡️ ERROR HANDLER: Starting pipeline wrapper for session {session_id}")
+        
+        try:
+            logger.info(f"🎯 About to call actual pipeline method...")
+            await self._run_discovery_pipeline(session_id, request, deps)
+            logger.info(f"✅ Pipeline completed successfully for session {session_id}")
+            
+        except Exception as e:
+            logger.error(f"💥 CRITICAL PIPELINE ERROR for session {session_id}: {e}")
+            logger.error(f"📍 Error type: {type(e).__name__}")
+            logger.error(f"📄 Error details: {str(e)}")
+            
+            # Try to update session as failed
+            try:
+                await self.storage_agent.update_discovery_session(
+                    deps,
+                    str(session_id),
+                    {
+                        "status": "failed",
+                        "completed_at": datetime.now(timezone.utc).isoformat(),
+                        "error_logs": [f"{type(e).__name__}: {str(e)}"]
+                    }
+                )
+                logger.info(f"📝 Updated session {session_id} status to failed")
+            except Exception as update_error:
+                logger.error(f"❌ Could not update session status: {update_error}")
         
     async def _run_discovery_pipeline(
         self,
@@ -108,7 +147,14 @@ class DiscoveryOrchestrator:
         logger.info(f"📋 Request details: query='{request.search_query}', max_results={request.max_results}")
         logger.info(f"🔧 Pipeline task started - this should print immediately!")
         
+        # Add small delay to ensure this logs first
+        await asyncio.sleep(0.1)
+        logger.info(f"⏱️ After 100ms delay - pipeline still running")
+        
         try:
+            logger.info(f"🎬 Entering try block for session {session_id}")
+            await asyncio.sleep(0.1)
+            logger.info(f"⚡ About to start main pipeline logic")
             logger.info(f"Starting discovery pipeline for session {session_id}")
             
             # Phase 1: YouTube Discovery
