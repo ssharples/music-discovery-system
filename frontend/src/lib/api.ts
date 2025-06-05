@@ -90,7 +90,7 @@ class ApiClient {
   }
 
   async startDiscovery(request: DiscoveryRequest): Promise<DiscoveryResponse> {
-    return this.request<DiscoveryResponse>('/api/discovery/start', {
+    return this.request<DiscoveryResponse>('/api/discover', {
       method: 'POST',
       body: JSON.stringify(request),
     });
