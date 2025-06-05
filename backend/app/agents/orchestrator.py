@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Optional
 from uuid import uuid4, UUID
 import logging
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import BackgroundTasks
 
 from app.core.dependencies import PipelineDependencies
@@ -68,7 +68,7 @@ class DiscoveryOrchestrator:
         
         session_data = {
             "id": str(session_id),
-            "started_at": datetime.now().isoformat(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
             "status": "running",
             "metadata": {
                 "search_query": request.search_query,
@@ -183,7 +183,7 @@ class DiscoveryOrchestrator:
                 str(session_id),
                 {
                     "status": "completed",
-                    "completed_at": datetime.now().isoformat(),
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
                     "artists_discovered": len(enriched_artists),
                     "videos_processed": total_videos
                 }
@@ -215,7 +215,7 @@ class DiscoveryOrchestrator:
                 str(session_id),
                 {
                     "status": "failed",
-                    "completed_at": datetime.now().isoformat(),
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
                     "error_logs": [str(e)]
                 }
             )
@@ -358,8 +358,13 @@ class DiscoveryOrchestrator:
             limit = quota_data.get("quota_limit", 10000)
             
             # Check if we need to reset (daily quota)
-            reset_time = datetime.fromisoformat(quota_data.get("reset_time", datetime.now().isoformat()))
-            if datetime.now() > reset_time:
+            reset_time_str = quota_data.get("reset_time", datetime.now(timezone.utc).isoformat())
+            reset_time = datetime.fromisoformat(reset_time_str)
+            # Ensure both datetimes are timezone-aware for comparison
+            if reset_time.tzinfo is None:
+                reset_time = reset_time.replace(tzinfo=timezone.utc)
+            current_time = datetime.now(timezone.utc)
+            if current_time > reset_time:
                 # Reset quota
                 await self._reset_api_quota(deps, "youtube")
                 return limit
@@ -383,7 +388,7 @@ class DiscoveryOrchestrator:
             current = result.data[0]
             await deps.supabase.table("api_rate_limits").update({
                 "requests_made": current["requests_made"] + units,
-                "last_request": datetime.now().isoformat()
+                "last_request": datetime.now(timezone.utc).isoformat()
             }).eq("id", current["id"]).execute()
         else:
             # Create new
@@ -391,8 +396,8 @@ class DiscoveryOrchestrator:
                 "api_name": api_name,
                 "requests_made": units,
                 "quota_limit": 10000 if api_name == "youtube" else 1000,
-                "reset_time": (datetime.now().replace(hour=0, minute=0, second=0) + timedelta(days=1)).isoformat(),
-                "last_request": datetime.now().isoformat()
+                "reset_time": (datetime.now(timezone.utc).replace(hour=0, minute=0, second=0) + timedelta(days=1)).isoformat(),
+                "last_request": datetime.now(timezone.utc).isoformat()
             }).execute()
             
     async def _reset_api_quota(self, deps: PipelineDependencies, api_name: str):
@@ -400,7 +405,7 @@ class DiscoveryOrchestrator:
         
         await deps.supabase.table("api_rate_limits").update({
             "requests_made": 0,
-            "reset_time": (datetime.now().replace(hour=0, minute=0, second=0) + timedelta(days=1)).isoformat()
+            "reset_time": (datetime.now(timezone.utc).replace(hour=0, minute=0, second=0) + timedelta(days=1)).isoformat()
         }).eq("api_name", api_name).execute()
         
     async def process_discovery_task(self, task: Dict[str, Any]):
