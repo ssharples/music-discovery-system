@@ -5,8 +5,7 @@ services:
   # Backend Service
   backend:
     build: .
-    ports:
-      - "8000:8000"
+    # No external port needed - frontend nginx proxies internally
     environment:
       - ENVIRONMENT=production
       - DEBUG=false
