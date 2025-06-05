@@ -18,7 +18,7 @@ services:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_KEY=${SUPABASE_KEY}
       - SECRET_KEY=${SECRET_KEY}
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-https://musicagent.alluristdesign.dev}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
       - SENTRY_DSN=${SENTRY_DSN}
     restart: unless-stopped
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
