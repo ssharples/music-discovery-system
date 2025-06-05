@@ -4,7 +4,7 @@ from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from typing import List, Optional, Dict, Any
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from googleapiclient.discovery import build
 from youtube_transcript_api import YouTubeTranscriptApi
 import asyncio
@@ -47,13 +47,22 @@ async def search_youtube_videos(
         if not published_after:
             published_after = datetime.now() - timedelta(days=7)
             
+        # Convert to UTC timezone-aware datetime if needed
+        if published_after.tzinfo is None:
+            published_after = published_after.replace(tzinfo=timezone.utc)
+        else:
+            published_after = published_after.astimezone(timezone.utc)
+            
+        # Format as RFC 3339 UTC timestamp
+        published_after_str = published_after.strftime('%Y-%m-%dT%H:%M:%SZ')
+            
         search_request = youtube.search().list(
             q=query,
             part='id,snippet',
             maxResults=max_results,
             type='video',
             videoCategoryId='10',  # Music category
-            publishedAfter=published_after.isoformat() + 'Z',
+            publishedAfter=published_after_str,
             order='date',
             regionCode='US',
             relevanceLanguage='en'
