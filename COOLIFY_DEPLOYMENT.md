@@ -53,7 +53,7 @@ This guide will walk you through deploying your music discovery system on Coolif
    - **Name**: `music-discovery-system`
    - **Git Repository**: Your GitHub repo URL
    - **Branch**: `main`
-   - **Docker Compose File**: `docker-compose.coolify.yml`
+   - **Docker Compose File**: `docker-compose.coolify.yml` (or `docker-compose.coolify-alt.yml` if port 8000 conflicts)
 
 ### Step 4: Configure Environment Variables
 
@@ -115,6 +115,17 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 2. **Visit your domain** or Coolify-provided URL
 3. **Test the API**: `https://yourdomain.com/api/health`
 4. **Check logs** if needed: Click "Logs" in Coolify
+
+## ⚠️ **Port Conflict Resolution**
+
+**If your Coolify dashboard uses port 8000:**
+- Use `docker-compose.coolify-alt.yml` instead
+- Your app will be accessible on:
+  - **Frontend**: Port 80 (standard web traffic)
+  - **API**: Port 3001 (instead of 8000)
+  - **Health check**: `http://yourdomain.com/health`
+
+**No changes needed to your application code** - only the external port mapping changes.
 
 ## 🔧 Configuration Details
 

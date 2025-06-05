@@ -4,8 +4,8 @@ services:
   app:
     build: .
     ports:
-      - "80:80"
-      - "3001:8000"
+      - "80:80"      # Web traffic (standard)
+      - "3001:8000"  # API access (alternative port)
     environment:
       - ENVIRONMENT=production
       - DEBUG=false
