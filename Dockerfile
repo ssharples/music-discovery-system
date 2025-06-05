@@ -22,8 +22,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY backend/requirements-prod.txt .
+RUN pip install --no-cache-dir -r requirements-prod.txt
 
 # Copy backend code
 COPY backend/app ./app
