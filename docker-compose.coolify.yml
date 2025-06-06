@@ -19,6 +19,13 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-https://yourdomain.com}
       - SENTRY_DSN=${SENTRY_DSN}
+      # Enhanced AI Provider Keys
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # Firecrawl Configuration
+      - FIRECRAWL_API_URL=${FIRECRAWL_API_URL:-https://api.firecrawl.dev}
+      - FIRECRAWL_TIMEOUT=${FIRECRAWL_TIMEOUT:-30000}
+      - FIRECRAWL_MAX_RETRIES=${FIRECRAWL_MAX_RETRIES:-3}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
