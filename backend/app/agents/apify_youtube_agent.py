@@ -859,7 +859,7 @@ class ApifyYouTubeAgent:
     async def discover_undiscovered_artists(self, max_results: int = 100) -> List[Dict[str, Any]]:
         """
         Discover undiscovered artists by searching for 'official music video' 
-        with filters for recent uploads (24 hours) and low view counts (<50k)
+        with filters for recent uploads and low view counts (<50k)
         
         Args:
             max_results: Maximum number of videos to analyze
@@ -881,51 +881,28 @@ class ApifyYouTubeAgent:
                 "unsigned artist music video"
             ]
             
-            # Generate search URLs for undiscovered talent discovery
-            start_urls = []
-            for keyword in discovery_keywords:
-                search_url = f"https://www.youtube.com/results?search_query={keyword.replace(' ', '+')}"
-                start_urls.append(search_url)
+            logger.info(f"🔍 Discovering undiscovered artists with recent uploads (<50k views)")
             
-            # Configure for recent uploads and new talent discovery
-            actor_input = {
-                "startUrls": start_urls,
-                "keywords": discovery_keywords,
-                "maxItems": max_results * 2,  # Get more to filter down
-                "uploadDate": "today",  # Last 24 hours only
-                "duration": "all",
-                "features": "all",
-                "sort": "date",  # Sort by newest first for recent uploads
-                "gl": "us",
-                "hl": "en",
-                "maxRequestRetries": self.max_retries,
-                "requestTimeoutSecs": self.http_timeout
-            }
+            # Use the working search_music_content method with recent upload filter
+            all_videos = await self.search_music_content(
+                keywords=discovery_keywords,
+                max_results=max_results * 2,  # Get more to filter down
+                upload_date="week",  # Recent uploads (week is more reliable than "today")
+                duration="all",
+                sort_by="date"  # Sort by newest first
+            )
             
-            logger.info(f"🔍 Discovering undiscovered artists with recent uploads (<24h, <50k views)")
-            
-            # Start the actor run
-            run_response = await self._start_actor_run(actor_input)
-            if not run_response:
-                logger.error("❌ Failed to start actor run for undiscovered artists discovery")
+            if not all_videos:
+                logger.warning("⚠️ No videos returned from undiscovered artists search")
                 return []
             
-            run_id = run_response['data']['id']
-            logger.info(f"✅ Started undiscovered artists discovery run: {run_id}")
+            logger.info(f"📊 Retrieved {len(all_videos)} videos, now filtering for undiscovered artists...")
             
-            # Wait for completion and get results
-            results = await self._wait_for_completion_and_get_results(run_id, max_wait_time=self.actor_timeout)
+            # Filter for undiscovered artists
+            filtered_results = self._filter_for_undiscovered_artists(all_videos, max_view_count=50000)
             
-            if results:
-                # Process and filter results for undiscovered artists
-                processed_results = self._process_video_results(results)
-                filtered_results = self._filter_for_undiscovered_artists(processed_results, max_view_count=50000)
-                
-                logger.info(f"✅ Found {len(filtered_results)} undiscovered artists from {len(processed_results)} total videos")
-                return filtered_results[:max_results]  # Return up to max_results
-            else:
-                logger.warning("⚠️ No results returned from undiscovered artists search")
-                return []
+            logger.info(f"✅ Found {len(filtered_results)} undiscovered artists from {len(all_videos)} total videos")
+            return filtered_results[:max_results]  # Return up to max_results
                 
         except Exception as e:
             logger.error(f"❌ Error discovering undiscovered artists: {str(e)}")
