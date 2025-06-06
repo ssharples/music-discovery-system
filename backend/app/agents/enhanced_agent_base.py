@@ -1,7 +1,7 @@
 """
 Enhanced PydanticAI Agent Base with modern patterns and tools integration.
 """
-from pydantic_ai import Agent, RunContext, ModelRetry
+from pydantic_ai import Agent, ModelRetry
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.tools import Tool
@@ -124,14 +124,8 @@ class EnhancedAgentBase(ABC):
                     error=f"{self.agent_name} agent not available"
                 )
             
-            # Enhanced run context
-            run_context = RunContext(
-                deps=deps,
-                **kwargs
-            )
-            
-            # Execute with retries
-            result = await self._run_with_retries(prompt, run_context)
+            # Execute with retries - pass deps directly like existing agents
+            result = await self._run_with_retries(prompt, deps)
             
             processing_time = (datetime.now() - start_time).total_seconds()
             
@@ -160,11 +154,15 @@ class EnhancedAgentBase(ABC):
                 processing_time=processing_time
             )
     
-    async def _run_with_retries(self, prompt: str, context: RunContext, max_retries: int = 3):
+    async def _run_with_retries(self, prompt: str, deps: PipelineDependencies, max_retries: int = 3):
         """Execute agent with exponential backoff retries"""
+        import asyncio
+        
         for attempt in range(max_retries):
             try:
-                return await self.agent.run(prompt, deps=context.deps)
+                # Use the same pattern as existing agents
+                result = await self.agent.run(prompt, deps=deps)
+                return result
             except ModelRetry as e:
                 if attempt == max_retries - 1:
                     raise e
