@@ -38,7 +38,7 @@ def create_youtube_agent():
                     - Less than 100k views on recent videos
                     - Music-related content (official videos, audio, performances)
                     - English language content primarily
-                    - Recent uploads (last 30 days preferred)
+                    - Recent uploads (last 7 days preferred)
                     """
                 )
                 logger.info("✅ Created YouTube agent with DeepSeek AI")
@@ -196,56 +196,158 @@ class YouTubeDiscoveryAgent:
         query: str,
         max_results: int
     ) -> List[Dict[str, Any]]:
-        """Search for music channels using YouTube API"""
+        """Search for emerging music artists by finding recent videos with low view counts"""
         
         try:
-            # Enhanced search query for music artists
-            enhanced_query = f"{query} music artist singer musician"
+            # Step 1: Search for recent videos (last 7 days) with music-related queries
+            from datetime import datetime, timedelta
             
-            search_url = f"{self.base_url}/search"
+            # Calculate date 7 days ago for publishedAfter filter
+            seven_days_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%SZ')
+            
+            # Enhanced search query for emerging music content
+            music_queries = [
+                f"{query} music original song",
+                f"{query} artist new music",
+                f"{query} singer songwriter",
+                f"{query} musician debut"
+            ]
+            
+            all_channels = {}  # Use dict to avoid duplicates
+            
+            for search_query in music_queries:
+                logger.info(f"🔎 Searching for recent videos: '{search_query}'")
+                
+                search_url = f"{self.base_url}/search"
+                params = {
+                    "key": settings.YOUTUBE_API_KEY,
+                    "q": search_query,
+                    "type": "video",
+                    "part": "snippet",
+                    "maxResults": 25,  # Search more videos to filter channels
+                    "order": "date",  # Most recent first
+                    "publishedAfter": seven_days_ago,  # Last 7 days only
+                    "regionCode": "US",
+                    "safeSearch": "moderate",
+                    "videoCategoryId": "10"  # Music category
+                }
+                
+                response = await deps.http_client.get(search_url, params=params)
+                
+                if response.status_code == 403:
+                    quota_info = response.json().get('error', {}).get('message', '')
+                    if 'quota' in quota_info.lower():
+                        logger.error(f"❌ YouTube quota exceeded: {quota_info}")
+                        break
+                    else:
+                        logger.error(f"❌ YouTube API access denied: {quota_info}")
+                        continue
+                
+                response.raise_for_status()
+                data = response.json()
+                
+                # Step 2: Get video statistics to filter by view count
+                video_ids = [item['id']['videoId'] for item in data.get('items', [])]
+                
+                if video_ids:
+                    filtered_channels = await self._filter_videos_by_view_count(
+                        deps, video_ids, data.get('items', [])
+                    )
+                    
+                    # Merge results, avoiding duplicates
+                    for channel in filtered_channels:
+                        channel_id = channel['channel_id']
+                        if channel_id not in all_channels:
+                            all_channels[channel_id] = channel
+                
+                # Rate limit between searches
+                await asyncio.sleep(0.5)
+            
+            channels_list = list(all_channels.values())
+            logger.info(f"📊 Found {len(channels_list)} unique emerging artist channels")
+            return channels_list[:max_results]
+            
+        except Exception as e:
+            logger.error(f"❌ Emerging artist search error: {e}")
+            return []
+    
+    async def _filter_videos_by_view_count(
+        self,
+        deps: PipelineDependencies,
+        video_ids: List[str],
+        video_items: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Filter videos by view count and extract channel info from qualifying videos"""
+        
+        if not video_ids:
+            return []
+        
+        try:
+            # Get video statistics
+            videos_url = f"{self.base_url}/videos"
             params = {
                 "key": settings.YOUTUBE_API_KEY,
-                "q": enhanced_query,
-                "type": "channel",
-                "part": "snippet",
-                "maxResults": min(max_results, 50),  # API limit
-                "order": "relevance",
-                "regionCode": "US",
-                "safeSearch": "moderate"
+                "id": ",".join(video_ids),
+                "part": "statistics,snippet"
             }
             
-            logger.info(f"🔎 Searching YouTube channels with query: '{enhanced_query}'")
-            
-            response = await deps.http_client.get(search_url, params=params)
-            
-            if response.status_code == 403:
-                quota_info = response.json().get('error', {}).get('message', '')
-                if 'quota' in quota_info.lower():
-                    logger.error(f"❌ YouTube quota exceeded: {quota_info}")
-                    return []
-                else:
-                    logger.error(f"❌ YouTube API access denied: {quota_info}")
-                    return []
-            
+            response = await deps.http_client.get(videos_url, params=params)
             response.raise_for_status()
             data = response.json()
             
-            channels = []
+            # Create lookup for video stats
+            video_stats = {}
             for item in data.get('items', []):
-                channel_info = {
-                    'channel_id': item['id']['channelId'],
-                    'channel_title': item['snippet']['title'],
-                    'channel_description': item['snippet']['description'],
-                    'thumbnail_url': item['snippet']['thumbnails'].get('default', {}).get('url'),
-                    'published_at': item['snippet']['publishedAt']
+                video_id = item['id']
+                view_count = int(item.get('statistics', {}).get('viewCount', 0))
+                video_stats[video_id] = {
+                    'view_count': view_count,
+                    'like_count': int(item.get('statistics', {}).get('likeCount', 0)),
+                    'comment_count': int(item.get('statistics', {}).get('commentCount', 0))
                 }
-                channels.append(channel_info)
             
-            logger.info(f"📊 Found {len(channels)} channels from search")
-            return channels
+            # Filter videos with < 100k views and extract channels
+            qualifying_channels = {}
+            
+            for video_item in video_items:
+                video_id = video_item['id']['videoId']
+                
+                if video_id in video_stats:
+                    view_count = video_stats[video_id]['view_count']
+                    
+                    # Filter: Less than 100k views for emerging artists
+                    if view_count < 100000:
+                        channel_id = video_item['snippet']['channelId']
+                        
+                        if channel_id not in qualifying_channels:
+                            qualifying_channels[channel_id] = {
+                                'channel_id': channel_id,
+                                'channel_title': video_item['snippet']['channelTitle'],
+                                'channel_description': '',  # Will be enriched later
+                                'thumbnail_url': video_item['snippet']['thumbnails'].get('default', {}).get('url'),
+                                'published_at': video_item['snippet']['publishedAt'],
+                                'qualifying_videos': [],
+                                'total_qualifying_views': 0
+                            }
+                        
+                        # Track qualifying videos for this channel
+                        qualifying_channels[channel_id]['qualifying_videos'].append({
+                            'video_id': video_id,
+                            'title': video_item['snippet']['title'],
+                            'view_count': view_count,
+                            'published_at': video_item['snippet']['publishedAt']
+                        })
+                        qualifying_channels[channel_id]['total_qualifying_views'] += view_count
+                        
+                        logger.debug(f"✅ Qualifying video: '{video_item['snippet']['title']}' ({view_count:,} views)")
+            
+            channels_list = list(qualifying_channels.values())
+            logger.info(f"🎯 Found {len(channels_list)} channels with emerging content (< 100k views, last 7 days)")
+            
+            return channels_list
             
         except Exception as e:
-            logger.error(f"❌ Channel search error: {e}")
+            logger.error(f"❌ Error filtering videos by view count: {e}")
             return []
     
     async def _enrich_channels_with_details(
@@ -311,15 +413,24 @@ class YouTubeDiscoveryAgent:
                 snippet = item.get('snippet', {})
                 branding = item.get('brandingSettings', {})
                 
+                # Enhanced stats for emerging artist discovery
+                subscriber_count = int(stats.get('subscriberCount', 0))
+                video_count = int(stats.get('videoCount', 0))
+                view_count = int(stats.get('viewCount', 0))
+                
                 stats_lookup[channel_id] = {
-                    'subscriber_count': int(stats.get('subscriberCount', 0)),
-                    'video_count': int(stats.get('videoCount', 0)),
-                    'view_count': int(stats.get('viewCount', 0)),
+                    'subscriber_count': subscriber_count,
+                    'video_count': video_count,
+                    'view_count': view_count,
                     'country': snippet.get('country'),
                     'custom_url': snippet.get('customUrl'),
                     'keywords': branding.get('channel', {}).get('keywords', ''),
                     'has_recent_uploads': self._check_recent_uploads(stats),
-                    'has_music_content': self._check_music_content(snippet, branding)
+                    'has_music_content': self._check_music_content(snippet, branding),
+                    'channel_description': snippet.get('description', ''),
+                    'created_at': snippet.get('publishedAt'),
+                    # Flag for emerging artist status
+                    'is_likely_emerging': subscriber_count < 50000 and view_count < 500000
                 }
             
             # Merge with original channel data
@@ -440,38 +551,135 @@ class YouTubeDiscoveryAgent:
             return 0.0
     
     async def _apply_quality_filters(self, channels: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Apply quality filters to remove low-quality channels"""
+        """Apply quality filters optimized for emerging artists discovery"""
         
         if not channels:
             return []
         
-        logger.info(f"🎯 Applying quality filters to {len(channels)} channels")
+        logger.info(f"🎯 Applying emerging artist quality filters to {len(channels)} channels")
         
         filtered_channels = []
         
         for channel in channels:
-            # Quality thresholds
-            min_subscribers = 50
-            min_videos = 3
-            min_engagement_score = 0.1
-            min_music_relevance = 0.2
+            # Emerging artist quality thresholds (more lenient for discovery)
+            min_subscribers = 10  # Very low threshold for emerging artists
+            max_subscribers = 50000  # Upper limit to avoid big names
+            min_videos = 1  # At least one video
+            max_total_views = 500000  # Total channel views limit for emerging status
+            min_recent_activity = True  # Must have qualifying videos from last 7 days
             
-            # Check filters
-            if (channel.get('subscriber_count', 0) >= min_subscribers and
-                channel.get('video_count', 0) >= min_videos and
-                channel.get('engagement_score', 0) >= min_engagement_score and
-                channel.get('music_relevance_score', 0) >= min_music_relevance and
-                not deduplication_manager.is_duplicate(channel)):
+            # Get channel stats (with defaults for emerging channels)
+            subscriber_count = channel.get('subscriber_count', 0)
+            video_count = channel.get('video_count', 0)
+            total_views = channel.get('view_count', 0)
+            qualifying_videos = channel.get('qualifying_videos', [])
+            
+            # Calculate emerging artist score
+            emerging_score = self._calculate_emerging_artist_score(channel)
+            
+            # Check emerging artist filters
+            passes_filters = (
+                # Basic activity requirements
+                subscriber_count >= min_subscribers and
+                subscriber_count <= max_subscribers and
+                video_count >= min_videos and
+                total_views <= max_total_views and
+                
+                # Must have recent qualifying content
+                len(qualifying_videos) > 0 and
+                
+                # Minimum emerging artist score
+                emerging_score >= 0.3 and
+                
+                # Deduplication check
+                not deduplication_manager.is_duplicate(channel)
+            )
+            
+            if passes_filters:
+                # Add emerging artist metadata
+                channel['emerging_score'] = emerging_score
+                channel['is_emerging_artist'] = True
+                channel['discovery_criteria'] = {
+                    'recent_videos_count': len(qualifying_videos),
+                    'avg_views_per_recent_video': channel.get('total_qualifying_views', 0) / max(len(qualifying_videos), 1),
+                    'subscriber_to_view_ratio': subscriber_count / max(total_views, 1)
+                }
                 
                 filtered_channels.append(channel)
                 deduplication_manager.mark_as_processed(channel)
                 
-                logger.debug(f"✅ Channel passed filters: {channel.get('channel_title')}")
+                logger.info(f"✅ Emerging artist found: {channel.get('channel_title')} "
+                          f"({subscriber_count:,} subs, {len(qualifying_videos)} recent videos, score: {emerging_score:.2f})")
             else:
-                logger.debug(f"⚠️ Channel filtered out: {channel.get('channel_title')}")
+                filter_reasons = []
+                if subscriber_count < min_subscribers:
+                    filter_reasons.append(f"too few subscribers ({subscriber_count})")
+                if subscriber_count > max_subscribers:
+                    filter_reasons.append(f"too many subscribers ({subscriber_count:,}) - likely established artist")
+                if total_views > max_total_views:
+                    filter_reasons.append(f"too many total views ({total_views:,}) - likely established")
+                if len(qualifying_videos) == 0:
+                    filter_reasons.append("no recent qualifying videos")
+                if emerging_score < 0.3:
+                    filter_reasons.append(f"low emerging score ({emerging_score:.2f})")
+                
+                logger.debug(f"⚠️ Filtered out: {channel.get('channel_title')} - {', '.join(filter_reasons)}")
         
-        logger.info(f"🎯 Quality filtering complete: {len(filtered_channels)}/{len(channels)} channels passed")
+        logger.info(f"🎯 Emerging artist filtering complete: {len(filtered_channels)}/{len(channels)} channels passed")
         return filtered_channels
+    
+    def _calculate_emerging_artist_score(self, channel: Dict[str, Any]) -> float:
+        """Calculate score specifically for emerging artist potential"""
+        try:
+            score = 0.0
+            
+            # Get metrics
+            subscriber_count = channel.get('subscriber_count', 0)
+            video_count = channel.get('video_count', 0)
+            qualifying_videos = channel.get('qualifying_videos', [])
+            total_qualifying_views = channel.get('total_qualifying_views', 0)
+            
+            # Recent activity (most important for emerging artists)
+            if len(qualifying_videos) > 0:
+                score += 0.4  # Base score for having recent content
+                
+                # Bonus for multiple recent videos
+                if len(qualifying_videos) >= 2:
+                    score += 0.1
+                if len(qualifying_videos) >= 3:
+                    score += 0.1
+            
+            # Engagement potential (views vs subscribers)
+            if subscriber_count > 0 and total_qualifying_views > 0:
+                avg_views_per_video = total_qualifying_views / len(qualifying_videos) if qualifying_videos else 0
+                
+                # Good engagement for emerging artists (views per video vs subscriber count)
+                if avg_views_per_video > subscriber_count * 0.1:  # 10% of subscribers watch
+                    score += 0.2
+                elif avg_views_per_video > subscriber_count * 0.05:  # 5% watch
+                    score += 0.1
+            
+            # Content consistency
+            if video_count > 0:
+                # Regular content creation
+                if video_count >= 5:
+                    score += 0.1
+                elif video_count >= 3:
+                    score += 0.05
+            
+            # Growth potential indicators
+            if subscriber_count > 0:
+                # Sweet spot for emerging artists
+                if 50 <= subscriber_count <= 5000:
+                    score += 0.1
+                elif 10 <= subscriber_count <= 50:
+                    score += 0.05
+            
+            return min(score, 1.0)
+            
+        except Exception as e:
+            logger.error(f"Error calculating emerging artist score: {e}")
+            return 0.0
     
     async def get_artist_videos_with_captions(
         self,
