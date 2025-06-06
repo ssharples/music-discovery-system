@@ -185,7 +185,7 @@ class ApifyYouTubeAgent:
                 "uploadDate": upload_date,
                 "duration": duration,
                 "features": "all",  # Include features parameter
-                "sort": sort_by,
+                "sort": "r" if sort_by == "relevance" else "d" if sort_by == "date" else "r",
                 "gl": "us",  # Geographic location
                 "hl": "en"   # Language
             }
@@ -862,8 +862,7 @@ class ApifyYouTubeAgent:
         
         try:
             # Search terms optimized for discovering new talent
-            discovery_keywords =   "official music video"
-            
+            discovery_keywords = ["official music video"]
             
             logger.info(f"🔍 Discovering undiscovered artists with recent uploads (<50k views)")
             
