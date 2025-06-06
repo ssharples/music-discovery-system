@@ -148,7 +148,7 @@ class ApifyYouTubeAgent:
                            keywords: List[str], 
                            max_results: int = 50,
                            upload_date: str = "t",
-                           duration: str = "any",
+                           duration: str = "all",
                            sort_by: str = "relevance") -> List[Dict[str, Any]]:
         """
         Search for music content using Apify YouTube scraper with improved error handling
@@ -256,7 +256,7 @@ class ApifyYouTubeAgent:
                 "startUrls": channel_urls,
                 "maxItems": max_videos_per_channel * len(channel_urls),
                 "uploadDate": "t",
-                "duration": "any", 
+                "duration": "all", 
                 "features": "any",
                 "sort": "r",
                 "gl": "us",
@@ -302,7 +302,7 @@ class ApifyYouTubeAgent:
                 "getTrending": True,
                 "maxItems": max_results,
                 "uploadDate": "t",
-                "duration": "any",
+                "duration": "all",
                 "features": "any", 
                 "sort": "r",
                 "gl": "us",
@@ -878,7 +878,7 @@ class ApifyYouTubeAgent:
                 keywords=discovery_keywords,
                 max_results=max_results * 2,  # Get more to filter down
                 upload_date="t",  # Recent uploads (today)
-                duration="any",
+                duration="all",
                 sort_by="date"  # Sort by newest first
             )
             
@@ -920,7 +920,7 @@ class ApifyYouTubeAgent:
                 "youtubeHandles": handles,
                 "maxItems": max_results,
                 "uploadDate": "t",
-                "duration": "any",
+                "duration": "all",
                 "features": "any",
                 "sort": "r",
                 "gl": "us",
