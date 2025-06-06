@@ -27,7 +27,7 @@ class ApifyYouTubeAgent:
     
     def __init__(self):
         self.apify_api_token = settings.APIFY_API_TOKEN or os.getenv('APIFY_API_TOKEN')
-        self.actor_id = "streamers/youtube-scraper"  # Official Apify YouTube scraper
+        self.actor_id = "apidojo~youtube-scraper"  # The actor we analyzed
         self.base_url = "https://api.apify.com/v2"
         
         # Use configured timeouts
@@ -158,23 +158,15 @@ class ApifyYouTubeAgent:
         max_results = min(max_results, 100)  # Cap at 100 to prevent timeouts
         
         try:
-            # Prepare input for the streamers/youtube-scraper actor
-            # Convert keywords to search URLs for better compatibility
-            search_urls = []
-            for keyword in keywords:
-                # Create YouTube search URL for each keyword
-                search_url = f"https://www.youtube.com/results?search_query={keyword.replace(' ', '+')}"
-                search_urls.append(search_url)
-            
+            # Prepare input for the apidojo~youtube-scraper actor with timeout-friendly settings
             actor_input = {
-                "startUrls": search_urls,
+                "keywords": keywords,
                 "maxItems": max_results,
                 "uploadDate": upload_date,
                 "duration": duration,
                 "sort": sort_by,
-                "proxyConfiguration": {
-                    "useApifyProxy": True
-                },
+                "gl": "us",  # Geographic location
+                "hl": "en",   # Language
                 "maxRequestRetries": self.max_retries,  # Add retries at actor level
                 "requestTimeoutSecs": self.http_timeout  # Timeout per request
             }
@@ -244,9 +236,8 @@ class ApifyYouTubeAgent:
             actor_input = {
                 "startUrls": channel_urls,
                 "maxItems": max_videos_per_channel * len(channel_urls),
-                "proxyConfiguration": {
-                    "useApifyProxy": True
-                }
+                "gl": "us",
+                "hl": "en"
             }
             
             logger.info(f"Getting videos from {len(channel_urls)} channels")
@@ -283,14 +274,11 @@ class ApifyYouTubeAgent:
             return []
         
         try:
-            # Use trending YouTube URL
-            trending_url = "https://www.youtube.com/feed/trending"
             actor_input = {
-                "startUrls": [trending_url],
+                "getTrending": True,
                 "maxItems": max_results,
-                "proxyConfiguration": {
-                    "useApifyProxy": True
-                }
+                "gl": "us",
+                "hl": "en"
             }
             
             logger.info("Getting trending videos from YouTube")
@@ -532,21 +520,20 @@ class ApifyYouTubeAgent:
                 # Extract artist name from video title (similar to your existing logic)
                 extracted_artist = self._extract_artist_name_from_title(item.get('title', ''))
                 
-                # Handle different possible field structures from streamers/youtube-scraper
                 processed_video = {
                     'video_id': item.get('id', ''),
                     'title': item.get('title', ''),
-                    'description': item.get('text', ''),  # Different field name
-                    'channel_id': item.get('channelUrl', '').split('/')[-1] if item.get('channelUrl') else '',
-                    'channel_title': item.get('channelName', ''),
-                    'channel_url': item.get('channelUrl', ''),
+                    'description': item.get('description', ''),
+                    'channel_id': item.get('channel', {}).get('id', ''),
+                    'channel_title': item.get('channel', {}).get('name', ''),
+                    'channel_url': item.get('channel', {}).get('url', ''),
                     'extracted_artist_name': extracted_artist,
-                    'published_at': item.get('date', ''),
-                    'duration_seconds': self._parse_duration(item.get('duration', '')),
-                    'view_count': self._parse_view_count(item.get('viewCount', 0)),
+                    'published_at': item.get('publishDate', ''),
+                    'duration_seconds': item.get('duration', 0),
+                    'view_count': item.get('views', 0),
                     'like_count': item.get('likes', 0),
                     'url': item.get('url', ''),
-                    'thumbnail_url': item.get('thumbnailUrl', ''),
+                    'thumbnail_url': self._get_best_thumbnail(item.get('thumbnails', [])),
                     'is_live': item.get('isLive', False),
                     'data_source': 'apify_youtube'
                 }
@@ -558,45 +545,6 @@ class ApifyYouTubeAgent:
                 continue
         
         return processed_results
-    
-    def _parse_duration(self, duration_str: str) -> int:
-        """Parse duration string like '3:45' to seconds"""
-        if not duration_str:
-            return 0
-        
-        try:
-            parts = duration_str.split(':')
-            if len(parts) == 2:  # MM:SS
-                return int(parts[0]) * 60 + int(parts[1])
-            elif len(parts) == 3:  # HH:MM:SS
-                return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-            else:
-                return 0
-        except (ValueError, IndexError):
-            return 0
-    
-    def _parse_view_count(self, view_count) -> int:
-        """Parse view count which might be string like '1.2M' or integer"""
-        if isinstance(view_count, int):
-            return view_count
-        
-        if isinstance(view_count, str):
-            # Remove 'views' and clean up
-            view_str = view_count.lower().replace(',', '').replace(' views', '').replace(' view', '').strip()
-            
-            try:
-                if 'k' in view_str:
-                    return int(float(view_str.replace('k', '')) * 1000)
-                elif 'm' in view_str:
-                    return int(float(view_str.replace('m', '')) * 1000000)
-                elif 'b' in view_str:
-                    return int(float(view_str.replace('b', '')) * 1000000000)
-                else:
-                    return int(view_str)
-            except (ValueError, TypeError):
-                return 0
-        
-        return 0
     
     def _extract_artist_name_from_title(self, title: str) -> Optional[str]:
         """
@@ -664,8 +612,8 @@ class ApifyYouTubeAgent:
         filtered_videos = []
         for video in videos:
             title = video.get('title', '').lower()
-            description = video.get('text', '').lower()  # Use 'text' field for description
-            channel_name = video.get('channelName', '').lower()
+            description = video.get('description', '').lower()
+            channel_name = video.get('channel', {}).get('name', '').lower()
             
             # Check if any music-related keywords are present
             text_to_check = f"{title} {description} {channel_name}"
@@ -676,16 +624,16 @@ class ApifyYouTubeAgent:
     
     def get_cost_estimate(self, expected_videos: int) -> float:
         """
-        Calculate estimated cost for scraping with streamers/youtube-scraper
-        Pricing: $5.00 per 1,000 videos
+        Calculate estimated cost for scraping
         
         Args:
-            expected_videos: Number of videos expected to scrape
-            
+            expected_videos: Number of videos expected to process
+        
         Returns:
             Estimated cost in USD
         """
-        cost_per_1000 = 5.00  # streamers/youtube-scraper pricing
+        # Apify actor pricing: approximately $0.50 per 1,000 videos
+        cost_per_1000 = 0.50
         return (expected_videos / 1000) * cost_per_1000
     
     async def _discover_with_smaller_batches(self, query: str, max_results: int) -> List[Dict[str, Any]]:
