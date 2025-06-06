@@ -12,6 +12,8 @@ import json
 from datetime import datetime
 import asyncio
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 class ApifyYouTubeAgent:
@@ -24,12 +26,19 @@ class ApifyYouTubeAgent:
     """
     
     def __init__(self):
-        self.apify_api_token = os.getenv('APIFY_API_TOKEN')
+        self.apify_api_token = settings.APIFY_API_TOKEN or os.getenv('APIFY_API_TOKEN')
         self.actor_id = "apidojo/youtube-scraper"  # The actor we analyzed
         self.base_url = "https://api.apify.com/v2"
         
+        # Use configured timeouts
+        self.actor_timeout = settings.APIFY_ACTOR_TIMEOUT
+        self.http_timeout = settings.APIFY_HTTP_TIMEOUT
+        self.max_retries = settings.APIFY_MAX_RETRIES
+        
         if not self.apify_api_token:
             logger.warning("APIFY_API_TOKEN not set - Apify YouTube scraping will be disabled")
+        else:
+            logger.info(f"🔧 Apify agent configured: timeout={self.actor_timeout}s, http_timeout={self.http_timeout}s")
     
     # Core methods that match YouTubeDiscoveryAgent interface
     
@@ -40,25 +49,30 @@ class ApifyYouTubeAgent:
         max_results: int = 50
     ) -> List[Dict[str, Any]]:
         """
-        Discover artists using Apify YouTube scraper
+        Discover artists using Apify YouTube scraper with fallback for timeouts
         
         This method matches the interface of YouTubeDiscoveryAgent.discover_artists()
         and returns the same data structure expected by the orchestrator.
         """
         if not self.apify_api_token:
-            logger.error("Cannot discover artists - APIFY_API_TOKEN not configured")
+            logger.error("❌ Cannot discover artists - APIFY_API_TOKEN not configured")
             return []
         
         try:
             logger.info(f"🔍 Discovering artists via Apify for query: '{query}', max_results: {max_results}")
             
-            # Search for music content using Apify
+            # Try main search first
             videos = await self.search_music_content(
                 keywords=[query],
                 max_results=max_results,
                 upload_date="month",  # Focus on recent content
                 sort_by="relevance"
             )
+            
+            # If main search fails or returns no results, try smaller searches
+            if not videos and max_results > 20:
+                logger.info("🔄 Main search failed, trying smaller batch searches...")
+                videos = await self._discover_with_smaller_batches(query, max_results)
             
             if not videos:
                 logger.warning("⚠️ No videos returned from Apify YouTube scraper")
@@ -124,7 +138,7 @@ class ApifyYouTubeAgent:
                            duration: str = "all",
                            sort_by: str = "relevance") -> List[Dict[str, Any]]:
         """
-        Search for music content using Apify YouTube scraper
+        Search for music content using Apify YouTube scraper with improved error handling
         
         Args:
             keywords: List of search terms (e.g., ["new music 2024", "indie rock"])
@@ -137,11 +151,14 @@ class ApifyYouTubeAgent:
             List of video data dictionaries
         """
         if not self.apify_api_token:
-            logger.error("Cannot search - APIFY_API_TOKEN not configured")
+            logger.error("❌ Cannot search - APIFY_API_TOKEN not configured")
             return []
         
+        # Limit max_results to prevent extremely long runs
+        max_results = min(max_results, 100)  # Cap at 100 to prevent timeouts
+        
         try:
-            # Prepare input for the Apify actor
+            # Prepare input for the Apify actor with timeout-friendly settings
             actor_input = {
                 "keywords": keywords,
                 "maxItems": max_results,
@@ -149,30 +166,53 @@ class ApifyYouTubeAgent:
                 "duration": duration,
                 "sort": sort_by,
                 "gl": "us",  # Geographic location
-                "hl": "en"   # Language
+                "hl": "en",   # Language
+                "maxRequestRetries": self.max_retries,  # Add retries at actor level
+                "requestTimeoutSecs": self.http_timeout  # Timeout per request
             }
             
-            logger.info(f"Starting Apify YouTube search with keywords: {keywords}")
+            logger.info(f"🔍 Starting Apify YouTube search with keywords: {keywords}, max_results: {max_results}")
             
-            # Start the actor run
-            run_response = await self._start_actor_run(actor_input)
+            # Start the actor run with retry logic
+            run_response = None
+            for attempt in range(self.max_retries):  # 3 attempts
+                try:
+                    run_response = await self._start_actor_run(actor_input)
+                    if run_response:
+                        break
+                    else:
+                        logger.warning(f"⚠️ Attempt {attempt + 1} failed to start actor run")
+                        if attempt < self.max_retries - 1:  # Don't sleep on last attempt
+                            await asyncio.sleep(5)
+                except Exception as e:
+                    logger.warning(f"⚠️ Attempt {attempt + 1} failed: {str(e)}")
+                    if attempt < self.max_retries - 1:
+                        await asyncio.sleep(5)
+            
             if not run_response:
+                logger.error("❌ Failed to start Apify actor run after 3 attempts")
                 return []
             
             run_id = run_response['data']['id']
+            logger.info(f"✅ Started Apify actor run: {run_id}")
             
-            # Wait for completion and get results
-            results = await self._wait_for_completion_and_get_results(run_id)
+            # Wait for completion and get results with extended timeout
+            results = await self._wait_for_completion_and_get_results(run_id, max_wait_time=self.actor_timeout)
             
             if results:
-                logger.info(f"Successfully scraped {len(results)} videos from YouTube")
-                return self._process_video_results(results)
+                processed_results = self._process_video_results(results)
+                logger.info(f"✅ Successfully processed {len(processed_results)} videos from Apify YouTube search")
+                return processed_results
             else:
-                logger.warning("No results returned from Apify YouTube scraper")
+                logger.warning("⚠️ No results returned from Apify YouTube scraper")
                 return []
                 
+        except asyncio.TimeoutError:
+            logger.error("❌ Apify search timed out")
+            return []
         except Exception as e:
-            logger.error(f"Error in Apify YouTube search: {str(e)}")
+            logger.error(f"❌ Error in Apify YouTube search: {str(e)}")
+            logger.error(f"Error type: {type(e).__name__}")
             return []
     
     async def get_channel_videos(self, 
@@ -390,7 +430,7 @@ class ApifyYouTubeAgent:
             return 0.0
     
     async def _start_actor_run(self, actor_input: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Start an Apify actor run"""
+        """Start an Apify actor run with improved timeout handling"""
         url = f"{self.base_url}/acts/{self.actor_id}/runs"
         headers = {
             "Authorization": f"Bearer {self.apify_api_token}",
@@ -398,25 +438,35 @@ class ApifyYouTubeAgent:
         }
         
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            # Increase timeout for starting actor run
+            async with httpx.AsyncClient(timeout=self.http_timeout) as client:
                 response = await client.post(url, headers=headers, json=actor_input)
                 response.raise_for_status()
                 return response.json()
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout starting Apify actor run: {str(e)}")
+            return None
         except httpx.RequestError as e:
             logger.error(f"Failed to start Apify actor run: {str(e)}")
             return None
     
-    async def _wait_for_completion_and_get_results(self, run_id: str, max_wait_time: int = 300) -> Optional[List[Dict[str, Any]]]:
-        """Wait for actor run to complete and return results"""
+    async def _wait_for_completion_and_get_results(self, run_id: str, max_wait_time: int = None) -> Optional[List[Dict[str, Any]]]:
+        """Wait for actor run to complete and return results with improved timeout handling"""
+        if max_wait_time is None:
+            max_wait_time = self.actor_timeout
+            
         start_time = time.time()
+        check_interval = 10  # Check every 10 seconds instead of 5
+        
+        logger.info(f"⏳ Waiting for Apify actor run {run_id} to complete (max {max_wait_time}s)")
         
         while time.time() - start_time < max_wait_time:
             try:
-                # Check run status
+                # Check run status with longer timeout
                 status_url = f"{self.base_url}/actor-runs/{run_id}"
                 headers = {"Authorization": f"Bearer {self.apify_api_token}"}
                 
-                async with httpx.AsyncClient(timeout=30.0) as client:
+                async with httpx.AsyncClient(timeout=60.0) as client:
                     status_response = await client.get(status_url, headers=headers)
                     status_response.raise_for_status()
                     status_data = status_response.json()
@@ -424,26 +474,41 @@ class ApifyYouTubeAgent:
                 run_status = status_data['data']['status']
                 
                 if run_status == 'SUCCEEDED':
-                    # Get results
+                    logger.info(f"✅ Apify actor run {run_id} completed successfully")
+                    # Get results with extended timeout
                     results_url = f"{self.base_url}/actor-runs/{run_id}/dataset/items"
-                    async with httpx.AsyncClient(timeout=60.0) as client:
+                    async with httpx.AsyncClient(timeout=self.http_timeout) as client:
                         results_response = await client.get(results_url, headers=headers)
                         results_response.raise_for_status()
-                        return results_response.json()
+                        results = results_response.json()
+                        logger.info(f"📊 Retrieved {len(results) if results else 0} results from Apify")
+                        return results
                 
                 elif run_status in ['FAILED', 'ABORTED', 'TIMED-OUT']:
-                    logger.error(f"Apify actor run {run_id} finished with status: {run_status}")
+                    logger.error(f"❌ Apify actor run {run_id} finished with status: {run_status}")
+                    # Try to get error details
+                    try:
+                        error_details = status_data.get('data', {}).get('stats', {})
+                        logger.error(f"Error details: {error_details}")
+                    except:
+                        pass
                     return None
                 
                 # Still running, wait a bit more
-                logger.info(f"Actor run {run_id} status: {run_status}, waiting...")
-                await asyncio.sleep(5)
+                elapsed = time.time() - start_time
+                logger.info(f"⏳ Actor run {run_id} status: {run_status}, elapsed: {elapsed:.1f}s")
+                await asyncio.sleep(check_interval)
                 
+            except httpx.TimeoutException as e:
+                logger.warning(f"⚠️ Timeout checking run status for {run_id}: {str(e)}")
+                await asyncio.sleep(check_interval)
+                continue
             except httpx.RequestError as e:
-                logger.error(f"Error checking run status: {str(e)}")
-                await asyncio.sleep(5)
+                logger.warning(f"⚠️ Error checking run status for {run_id}: {str(e)}")
+                await asyncio.sleep(check_interval)
+                continue
         
-        logger.error(f"Actor run {run_id} timed out after {max_wait_time} seconds")
+        logger.error(f"❌ Actor run {run_id} timed out after {max_wait_time} seconds")
         return None
     
     def _process_video_results(self, raw_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -568,4 +633,56 @@ class ApifyYouTubeAgent:
             Estimated cost in USD
         """
         cost_per_1000 = 0.50
-        return (expected_videos / 1000) * cost_per_1000 
+        return (expected_videos / 1000) * cost_per_1000
+    
+    async def _discover_with_smaller_batches(self, query: str, max_results: int) -> List[Dict[str, Any]]:
+        """Fallback method using smaller batch searches to avoid timeouts"""
+        logger.info(f"🔄 Using smaller batch discovery for query: '{query}'")
+        
+        all_videos = []
+        batch_size = 20  # Smaller batches are less likely to timeout
+        batches_needed = (max_results + batch_size - 1) // batch_size  # Round up division
+        
+        for batch_num in range(min(batches_needed, 3)):  # Max 3 batches to prevent long waits
+            try:
+                logger.info(f"📦 Processing batch {batch_num + 1}/{min(batches_needed, 3)}")
+                
+                # Add variation to search to get different results
+                search_keywords = [f"{query}"]
+                if batch_num == 1:
+                    search_keywords = [f"{query} new"]
+                elif batch_num == 2:
+                    search_keywords = [f"{query} 2024"]
+                
+                batch_videos = await self.search_music_content(
+                    keywords=search_keywords,
+                    max_results=batch_size,
+                    upload_date="month",
+                    sort_by="relevance"
+                )
+                
+                if batch_videos:
+                    all_videos.extend(batch_videos)
+                    logger.info(f"✅ Batch {batch_num + 1} returned {len(batch_videos)} videos")
+                else:
+                    logger.warning(f"⚠️ Batch {batch_num + 1} returned no results")
+                
+                # Small delay between batches
+                if batch_num < min(batches_needed, 3) - 1:
+                    await asyncio.sleep(2)
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Batch {batch_num + 1} failed: {str(e)}")
+                continue
+        
+        # Remove duplicates based on video_id
+        unique_videos = {}
+        for video in all_videos:
+            video_id = video.get('video_id')
+            if video_id and video_id not in unique_videos:
+                unique_videos[video_id] = video
+        
+        final_videos = list(unique_videos.values())[:max_results]
+        logger.info(f"🎯 Batch discovery completed: {len(final_videos)} unique videos")
+        
+        return final_videos 

@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = Field("", env="OPENAI_API_KEY")
     ANTHROPIC_API_KEY: str = Field("", env="ANTHROPIC_API_KEY")
     
+    # Apify Configuration (for YouTube scraping)
+    APIFY_API_TOKEN: str = Field("", env="APIFY_API_TOKEN")
+    APIFY_ACTOR_TIMEOUT: int = Field(600, env="APIFY_ACTOR_TIMEOUT")  # 10 minutes
+    APIFY_HTTP_TIMEOUT: int = Field(180, env="APIFY_HTTP_TIMEOUT")    # 3 minutes
+    APIFY_MAX_RETRIES: int = Field(3, env="APIFY_MAX_RETRIES")
+    
     # Firecrawl Configuration
     FIRECRAWL_API_URL: str = Field("https://api.firecrawl.dev", env="FIRECRAWL_API_URL")
     FIRECRAWL_TIMEOUT: int = Field(30000, env="FIRECRAWL_TIMEOUT")
@@ -51,6 +57,11 @@ class Settings(BaseSettings):
     
     # Monitoring
     SENTRY_DSN: Optional[str] = Field(None, env="SENTRY_DSN")
+    
+    # HTTP Client Timeouts
+    HTTP_CONNECT_TIMEOUT: int = Field(30, env="HTTP_CONNECT_TIMEOUT")
+    HTTP_READ_TIMEOUT: int = Field(300, env="HTTP_READ_TIMEOUT")  # 5 minutes
+    HTTP_POOL_TIMEOUT: int = Field(60, env="HTTP_POOL_TIMEOUT")
     
     @field_validator('ALLOWED_ORIGINS')
     @classmethod
@@ -99,6 +110,10 @@ class Settings(BaseSettings):
     def is_anthropic_configured(self) -> bool:
         """Check if Anthropic API is properly configured"""
         return bool(self.ANTHROPIC_API_KEY)
+    
+    def is_apify_configured(self) -> bool:
+        """Check if Apify API is properly configured"""
+        return bool(self.APIFY_API_TOKEN)
     
     def get_available_ai_providers(self) -> List[str]:
         """Get list of configured AI providers"""

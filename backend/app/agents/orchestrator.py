@@ -359,7 +359,7 @@ class DiscoveryOrchestrator:
         max_results: int,
         session_id: UUID
     ) -> List[Dict[str, Any]]:
-        """YouTube discovery with intelligent quality filtering"""
+        """YouTube discovery with intelligent quality filtering and timeout handling"""
         
         try:
             # Apify doesn't use YouTube API quotas - just check if configured
@@ -368,19 +368,56 @@ class DiscoveryOrchestrator:
                 return []
             
             logger.info(f"🔍 Apify YouTube discovery starting for query: {query}")
+            
+            # Try discovery with timeout handling
+            discovered_channels = []
             try:
-                discovered_channels = await self.youtube_agent.discover_artists(
-                    deps, query, max_results
+                # Use asyncio.wait_for to add an overall timeout to the discovery process
+                discovered_channels = await asyncio.wait_for(
+                    self.youtube_agent.discover_artists(deps, query, max_results),
+                    timeout=900  # 15 minutes total timeout
                 )
                 logger.info(f"✅ YouTube agent discover_artists completed")
+                
+            except asyncio.TimeoutError:
+                logger.error(f"❌ Discovery timed out after 15 minutes for query: {query}")
+                # Try a smaller search as fallback
+                if max_results > 20:
+                    logger.info("🔄 Trying fallback with smaller max_results...")
+                    try:
+                        discovered_channels = await asyncio.wait_for(
+                            self.youtube_agent.discover_artists(deps, query, 20),
+                            timeout=600  # 10 minutes for smaller search
+                        )
+                        logger.info(f"✅ Fallback discovery completed with {len(discovered_channels)} results")
+                    except Exception as fallback_error:
+                        logger.error(f"❌ Fallback discovery also failed: {fallback_error}")
+                        return []
+                        
             except Exception as discover_error:
                 logger.error(f"❌ YouTube agent discover_artists failed: {discover_error}")
                 logger.error(f"Error type: {type(discover_error).__name__}")
-                logger.error(f"Error details: {str(discover_error)}")
-                return []
+                
+                # Check if it's a specific timeout/gateway error
+                error_message = str(discover_error).lower()
+                if any(keyword in error_message for keyword in ['timeout', 'gateway', '504', '502', '503']):
+                    logger.info("🔄 Detected timeout/gateway error, trying reduced search...")
+                    try:
+                        # Try with much smaller parameters to avoid timeouts
+                        discovered_channels = await asyncio.wait_for(
+                            self.youtube_agent.discover_artists(deps, query, 15),
+                            timeout=300  # 5 minutes for emergency fallback
+                        )
+                        logger.info(f"✅ Emergency fallback completed with {len(discovered_channels)} results")
+                    except Exception as emergency_error:
+                        logger.error(f"❌ Emergency fallback also failed: {emergency_error}")
+                        return []
+                else:
+                    logger.error(f"Error details: {str(discover_error)}")
+                    return []
             
             if not discovered_channels:
-                logger.warning("⚠️ No channels discovered from YouTube API")
+                logger.warning("⚠️ No channels discovered from Apify YouTube scraper")
                 return []
             
             logger.info(f"📊 Filtering {len(discovered_channels)} channels for quality")
