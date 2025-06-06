@@ -36,8 +36,10 @@ def get_supabase() -> Client:
             # Add table method that returns a mock with common methods
             _supabase.table = lambda name: MagicMock()
         else:
-            _supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-            logger.info("Initialized Supabase client")
+            # Use service role key if available for backend operations
+            supabase_key = getattr(settings, 'SUPABASE_SERVICE_ROLE_KEY', None) or settings.SUPABASE_KEY
+            _supabase = create_client(settings.SUPABASE_URL, supabase_key)
+            logger.info(f"Initialized Supabase client with {'service role' if hasattr(settings, 'SUPABASE_SERVICE_ROLE_KEY') else 'anon'} key")
     return _supabase
 
 async def get_redis() -> redis.Redis:

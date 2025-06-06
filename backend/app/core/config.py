@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # Supabase (optional for basic deployment)
     SUPABASE_URL: str = Field("", env="SUPABASE_URL")
     SUPABASE_KEY: str = Field("", env="SUPABASE_KEY")
+    SUPABASE_SERVICE_ROLE_KEY: str = Field("", env="SUPABASE_SERVICE_ROLE_KEY")
     
     # Redis
     REDIS_URL: str = Field("redis://localhost:6379", env="REDIS_URL")
