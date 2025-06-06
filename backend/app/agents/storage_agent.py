@@ -367,6 +367,11 @@ class StorageAgent:
                         return await self._update_existing_artist(deps, existing, artist)
             
             # No duplicates found, create new artist
+            # Sanitize metadata to prevent deep nesting issues
+            sanitized_metadata = self._sanitize_metadata(artist.metadata)
+            sanitized_follower_counts = self._sanitize_json_data(artist.follower_counts)
+            sanitized_social_links = self._sanitize_json_data(artist.social_links)
+            
             artist_data = {
                 "name": artist.name,
                 "youtube_channel_id": artist.youtube_channel_id,
@@ -375,12 +380,12 @@ class StorageAgent:
                 "spotify_id": artist.spotify_id,
                 "email": artist.email,
                 "website": artist.website,
-                "genres": artist.genres,
+                "genres": artist.genres[:10] if artist.genres else [],  # Limit genres to prevent large arrays
                 "location": artist.location,
-                "bio": artist.bio,
-                "follower_counts": artist.follower_counts,
-                "social_links": artist.social_links,
-                "metadata": artist.metadata,
+                "bio": artist.bio[:2000] if artist.bio else None,  # Limit bio length
+                "follower_counts": sanitized_follower_counts,
+                "social_links": sanitized_social_links,
+                "metadata": sanitized_metadata,
                 "enrichment_score": artist.enrichment_score,
                 "status": artist.status,
                 "discovery_date": datetime.now().isoformat(),
@@ -500,3 +505,41 @@ class StorageAgent:
         except Exception as e:
             logger.error(f"Error updating artist profile: {e}")
             return False
+
+    def _sanitize_metadata(self, metadata: Dict[str, Any], max_depth: int = 3, current_depth: int = 0) -> Dict[str, Any]:
+        """Sanitize metadata to prevent deep nesting issues"""
+        if current_depth >= max_depth:
+            return {}
+        
+        sanitized = {}
+        for key, value in metadata.items():
+            if isinstance(value, dict) and current_depth < max_depth:
+                sanitized[key] = self._sanitize_metadata(value, max_depth, current_depth + 1)
+            elif isinstance(value, (str, int, float, bool)) or value is None:
+                sanitized[key] = value
+            elif isinstance(value, list):
+                # Limit list length and sanitize elements
+                sanitized[key] = [str(item)[:500] for item in value[:20]]  # Max 20 items, 500 chars each
+            else:
+                # Convert complex objects to strings
+                sanitized[key] = str(value)[:1000]
+        return sanitized
+
+    def _sanitize_json_data(self, data: Dict[str, Any], max_depth: int = 2, current_depth: int = 0) -> Dict[str, Any]:
+        """Sanitize JSON data to prevent deep nesting issues"""
+        if current_depth >= max_depth:
+            return {}
+        
+        sanitized = {}
+        for key, value in data.items():
+            if isinstance(value, dict) and current_depth < max_depth:
+                sanitized[key] = self._sanitize_json_data(value, max_depth, current_depth + 1)
+            elif isinstance(value, (str, int, float, bool)) or value is None:
+                sanitized[key] = value
+            elif isinstance(value, list):
+                # Convert lists to simple values
+                sanitized[key] = len(value) if isinstance(value, list) else str(value)[:100]
+            else:
+                # Convert complex objects to strings
+                sanitized[key] = str(value)[:100]
+        return sanitized
