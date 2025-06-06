@@ -12,7 +12,7 @@ import json
 
 from app.core.config import settings
 from app.core.dependencies import PipelineDependencies
-from app.core.quota_manager import quota_manager, response_cache, deduplication_manager
+from app.core import quota_manager, response_cache, deduplication_manager
 from app.models.artist import VideoMetadata
 
 logger = logging.getLogger(__name__)

@@ -11,6 +11,7 @@ from fastapi import BackgroundTasks
 
 from app.core.config import settings
 from app.core.dependencies import PipelineDependencies
+from app.core import quota_manager
 from app.models.artist import (
     DiscoveryRequest, ArtistProfile, VideoMetadata, 
     LyricAnalysis, EnrichedArtistData
@@ -50,56 +51,7 @@ def create_orchestrator_agent():
         logger.error(f"Failed to create orchestrator agent: {e}")
         return None
 
-class QuotaManager:
-    """Advanced quota management with per-operation cost tracking"""
-    
-    # API operation costs
-    YOUTUBE_COSTS = {
-        'search': 100,
-        'videos': 1,
-        'channels': 1,
-        'captions': 50,
-        'comments': 1
-    }
-    
-    SPOTIFY_COSTS = {
-        'search': 1,
-        'artist_details': 1,
-        'top_tracks': 1
-    }
-    
-    def __init__(self):
-        self._usage_cache = {}
-        self._daily_limits = {
-            'youtube': settings.YOUTUBE_QUOTA_PER_DAY,
-            'spotify': settings.SPOTIFY_RATE_LIMIT * 60  # Convert to per hour
-        }
-    
-    async def can_perform_operation(
-        self,
-        deps: PipelineDependencies,
-        api: str,
-        operation: str,
-        count: int = 1
-    ) -> bool:
-        """Check if operation can be performed within quota"""
-        try:
-            cost_map = self.YOUTUBE_COSTS if api == 'youtube' else self.SPOTIFY_COSTS
-            cost = cost_map.get(operation, 1) * count
-            
-            available = await self._get_remaining_quota(deps, api)
-            return available >= cost
-            
-        except Exception as e:
-            logger.error(f"Quota check error: {e}")
-            return True  # Allow operation if quota check fails
-    
-    async def _get_remaining_quota(self, deps: PipelineDependencies, api: str) -> int:
-        """Get remaining quota for API"""
-        # This would integrate with actual usage tracking
-        # For now, return a conservative estimate
-        daily_limit = self._daily_limits.get(api, 1000)
-        return daily_limit // 2  # Conservative estimate
+# Using global quota_manager from app.core.quota_manager
 
 class DiscoveryOrchestrator:
     """Main orchestrator for the discovery pipeline with intelligent coordination"""
@@ -111,7 +63,8 @@ class DiscoveryOrchestrator:
         self.storage_agent = StorageAgent()
         self._orchestrator_agent = None
         self._agent_creation_attempted = False
-        self.quota_manager = QuotaManager()
+        # Use global quota_manager from app.core.quota_manager
+        self.quota_manager = quota_manager
         self._processed_artists = set()  # Deduplication cache
         logger.info("✅ Orchestrator initialized with lazy agent loading")
     
@@ -217,13 +170,13 @@ class DiscoveryOrchestrator:
             
             # Check YouTube quota
             if not await self.quota_manager.can_perform_operation(
-                deps, 'youtube', 'search', estimated_youtube_searches
+                'youtube', 'search', estimated_youtube_searches
             ):
                 logger.error("❌ Insufficient YouTube quota for search operations")
                 return False
             
             if not await self.quota_manager.can_perform_operation(
-                deps, 'youtube', 'videos', estimated_video_lookups
+                'youtube', 'videos', estimated_video_lookups
             ):
                 logger.warning("⚠️ Limited YouTube quota for video operations")
                 # Continue but with reduced scope
@@ -391,7 +344,7 @@ class DiscoveryOrchestrator:
         
         try:
             # Check quota before proceeding
-            if not await self.quota_manager.can_perform_operation(deps, 'youtube', 'search', 1):
+            if not await self.quota_manager.can_perform_operation('youtube', 'search', 1):
                 logger.error("❌ Insufficient YouTube quota for search")
                 return []
             
@@ -598,7 +551,7 @@ class DiscoveryOrchestrator:
     async def _check_youtube_quota(self, deps: PipelineDependencies) -> int:
         """Check remaining YouTube API quota with improved tracking"""
         try:
-            return await self.quota_manager._get_remaining_quota(deps, 'youtube')
+            return await self.quota_manager.get_remaining_quota('youtube')
         except Exception as e:
             logger.error(f"Quota check error: {e}")
             return 1000  # Conservative fallback

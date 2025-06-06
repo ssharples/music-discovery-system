@@ -5,12 +5,12 @@ from datetime import datetime
 from uuid import UUID
 
 from app.core.dependencies import PipelineDependencies
-from app.models.artist import ArtistProfile, VideoMetadata, LyricAnalysis
+from app.models.artist import ArtistProfile, VideoMetadata, LyricAnalysis, EnrichedArtistData
 
 logger = logging.getLogger(__name__)
 
 class StorageAgent:
-    """Agent responsible for all database operations"""
+    """Agent responsible for all database operations with enhanced deduplication"""
     
     async def create_discovery_session(
         self,
@@ -41,12 +41,160 @@ class StorageAgent:
             logger.error(f"Error updating discovery session: {e}")
             return False
             
+    async def get_artist_by_channel_id(
+        self,
+        deps: PipelineDependencies,
+        channel_id: str
+    ) -> Optional[EnrichedArtistData]:
+        """Get artist by YouTube channel ID for deduplication"""
+        try:
+            result = deps.supabase.table("artists").select("*").eq(
+                "youtube_channel_id", channel_id
+            ).execute()
+            
+            if result.data and len(result.data) > 0:
+                artist_data = result.data[0]
+                # Convert to EnrichedArtistData
+                return self._convert_to_enriched_artist(artist_data)
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error fetching artist by channel ID: {e}")
+            return None
+            
+    async def get_artist_by_spotify_id(
+        self,
+        deps: PipelineDependencies,
+        spotify_id: str
+    ) -> Optional[EnrichedArtistData]:
+        """Get artist by Spotify ID for deduplication"""
+        try:
+            result = deps.supabase.table("artists").select("*").eq(
+                "spotify_id", spotify_id
+            ).execute()
+            
+            if result.data and len(result.data) > 0:
+                artist_data = result.data[0]
+                return self._convert_to_enriched_artist(artist_data)
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error fetching artist by Spotify ID: {e}")
+            return None
+            
+    async def find_similar_artists(
+        self,
+        deps: PipelineDependencies,
+        artist_name: str,
+        threshold: float = 0.8
+    ) -> List[Dict[str, Any]]:
+        """Find similar artists by name for fuzzy deduplication"""
+        try:
+            # Use case-insensitive search with similarity
+            result = deps.supabase.table("artists").select("*").ilike(
+                "name", f"%{artist_name}%"
+            ).execute()
+            
+            if result.data:
+                # Filter by similarity threshold
+                similar_artists = []
+                for artist in result.data:
+                    similarity = self._calculate_name_similarity(
+                        artist_name.lower(), 
+                        artist.get('name', '').lower()
+                    )
+                    if similarity >= threshold:
+                        artist['similarity_score'] = similarity
+                        similar_artists.append(artist)
+                
+                # Sort by similarity
+                similar_artists.sort(key=lambda x: x['similarity_score'], reverse=True)
+                return similar_artists
+            
+            return []
+            
+        except Exception as e:
+            logger.error(f"Error finding similar artists: {e}")
+            return []
+            
+    def _calculate_name_similarity(self, name1: str, name2: str) -> float:
+        """Calculate similarity between two artist names"""
+        # Simple character-based similarity
+        # In production, use more sophisticated algorithms like Levenshtein distance
+        if name1 == name2:
+            return 1.0
+        
+        # Normalize names
+        name1_normalized = ''.join(c for c in name1.lower() if c.isalnum())
+        name2_normalized = ''.join(c for c in name2.lower() if c.isalnum())
+        
+        if name1_normalized == name2_normalized:
+            return 0.95
+        
+        # Check if one contains the other
+        if name1_normalized in name2_normalized or name2_normalized in name1_normalized:
+            return 0.8
+        
+        # Basic character overlap
+        common_chars = set(name1_normalized) & set(name2_normalized)
+        total_chars = set(name1_normalized) | set(name2_normalized)
+        
+        if total_chars:
+            return len(common_chars) / len(total_chars)
+        
+        return 0.0
+    
+    def _convert_to_enriched_artist(self, artist_data: Dict[str, Any]) -> EnrichedArtistData:
+        """Convert database record to EnrichedArtistData model"""
+        try:
+            # Create ArtistProfile first
+            profile = ArtistProfile(
+                name=artist_data.get('name', ''),
+                youtube_channel_id=artist_data.get('youtube_channel_id'),
+                youtube_channel_name=artist_data.get('youtube_channel_name'),
+                instagram_handle=artist_data.get('instagram_handle'),
+                spotify_id=artist_data.get('spotify_id'),
+                email=artist_data.get('email'),
+                website=artist_data.get('website'),
+                genres=artist_data.get('genres', []),
+                location=artist_data.get('location'),
+                bio=artist_data.get('bio'),
+                follower_counts=artist_data.get('follower_counts', {}),
+                social_links=artist_data.get('social_links', {}),
+                metadata=artist_data.get('metadata', {}),
+                enrichment_score=artist_data.get('enrichment_score', 0.0),
+                status=artist_data.get('status', 'discovered')
+            )
+            
+            # Create EnrichedArtistData
+            enriched = EnrichedArtistData(
+                profile=profile,
+                videos=[],  # Would need to fetch separately
+                lyric_analyses=[],  # Would need to fetch separately
+                discovery_metadata={
+                    'discovery_date': artist_data.get('discovery_date'),
+                    'last_updated': artist_data.get('last_updated'),
+                    'database_id': artist_data.get('id')
+                }
+            )
+            
+            # Copy enrichment score to top level
+            enriched.enrichment_score = profile.enrichment_score
+            
+            return enriched
+            
+        except Exception as e:
+            logger.error(f"Error converting to EnrichedArtistData: {e}")
+            raise
+            
     async def store_video(
         self,
         deps: PipelineDependencies,
         video: VideoMetadata
     ) -> Optional[Dict[str, Any]]:
-        """Store video metadata"""
+        """Store video metadata with deduplication"""
         try:
             # Check if video already exists
             existing = deps.supabase.table("videos").select("*").eq(
@@ -54,6 +202,7 @@ class StorageAgent:
             ).execute()
             
             if existing.data:
+                logger.info(f"Video already exists: {video.youtube_video_id}")
                 return existing.data[0]
                 
             video_data = {
@@ -87,8 +236,17 @@ class StorageAgent:
         deps: PipelineDependencies,
         analysis: LyricAnalysis
     ) -> Optional[Dict[str, Any]]:
-        """Store lyric analysis"""
+        """Store lyric analysis with deduplication"""
         try:
+            # Check if analysis already exists for this video
+            existing = deps.supabase.table("lyric_analyses").select("*").eq(
+                "video_id", str(analysis.video_id)
+            ).execute()
+            
+            if existing.data:
+                logger.info(f"Lyric analysis already exists for video: {analysis.video_id}")
+                return existing.data[0]
+            
             analysis_data = {
                 "video_id": str(analysis.video_id),
                 "artist_id": str(analysis.artist_id),
@@ -179,13 +337,36 @@ class StorageAgent:
         deps: PipelineDependencies,
         artist: ArtistProfile
     ) -> Optional[Dict[str, Any]]:
-        """Store or update artist profile"""
+        """Store or update artist profile with comprehensive deduplication"""
         try:
-            # Check if artist already exists
-            existing = deps.supabase.table("artists").select("*").eq(
-                "youtube_channel_id", artist.youtube_channel_id
-            ).execute()
+            # Multi-level deduplication check
             
+            # 1. Check by YouTube channel ID
+            if artist.youtube_channel_id:
+                existing = await self.get_artist_by_channel_id(deps, artist.youtube_channel_id)
+                if existing:
+                    logger.info(f"Artist already exists with YouTube channel ID: {artist.youtube_channel_id}")
+                    return await self._update_existing_artist(deps, existing, artist)
+            
+            # 2. Check by Spotify ID
+            if artist.spotify_id:
+                existing = await self.get_artist_by_spotify_id(deps, artist.spotify_id)
+                if existing:
+                    logger.info(f"Artist already exists with Spotify ID: {artist.spotify_id}")
+                    return await self._update_existing_artist(deps, existing, artist)
+            
+            # 3. Check by similar name
+            similar_artists = await self.find_similar_artists(deps, artist.name, threshold=0.85)
+            if similar_artists:
+                # Check if any have matching identifiers
+                for similar in similar_artists:
+                    if (similar.get('youtube_channel_id') == artist.youtube_channel_id or
+                        similar.get('spotify_id') == artist.spotify_id):
+                        logger.info(f"Found similar artist: {similar.get('name')}")
+                        existing = self._convert_to_enriched_artist(similar)
+                        return await self._update_existing_artist(deps, existing, artist)
+            
+            # No duplicates found, create new artist
             artist_data = {
                 "name": artist.name,
                 "youtube_channel_id": artist.youtube_channel_id,
@@ -202,29 +383,105 @@ class StorageAgent:
                 "metadata": artist.metadata,
                 "enrichment_score": artist.enrichment_score,
                 "status": artist.status,
+                "discovery_date": datetime.now().isoformat(),
                 "last_updated": datetime.now().isoformat()
             }
             
-            if existing.data:
-                # Update existing artist
-                result = deps.supabase.table("artists").update(
-                    artist_data
-                ).eq("id", existing.data[0]["id"]).execute()
+            result = deps.supabase.table("artists").insert(artist_data).execute()
+            
+            if result.data:
+                logger.info(f"✅ Created new artist: {artist.name}")
+                return result.data[0]
                 
-                if result.data:
-                    return result.data[0]
-            else:
-                # Insert new artist
-                artist_data["discovery_date"] = datetime.now().isoformat()
-                result = deps.supabase.table("artists").insert(artist_data).execute()
-                
-                if result.data:
-                    return result.data[0]
-                    
             return None
             
         except Exception as e:
             logger.error(f"Error storing artist profile: {e}")
+            return None
+    
+    async def _update_existing_artist(
+        self,
+        deps: PipelineDependencies,
+        existing: EnrichedArtistData,
+        new_data: ArtistProfile
+    ) -> Optional[Dict[str, Any]]:
+        """Update existing artist with new data if it improves the profile"""
+        try:
+            db_id = existing.discovery_metadata.get('database_id')
+            if not db_id:
+                logger.error("No database ID found for existing artist")
+                return None
+            
+            # Only update if new data has higher enrichment score or adds new information
+            should_update = False
+            update_data = {}
+            
+            # Check enrichment score
+            if new_data.enrichment_score > existing.enrichment_score:
+                should_update = True
+                update_data["enrichment_score"] = new_data.enrichment_score
+            
+            # Check for new social media data
+            if new_data.spotify_id and not existing.profile.spotify_id:
+                should_update = True
+                update_data["spotify_id"] = new_data.spotify_id
+            
+            if new_data.instagram_handle and not existing.profile.instagram_handle:
+                should_update = True
+                update_data["instagram_handle"] = new_data.instagram_handle
+            
+            if new_data.email and not existing.profile.email:
+                should_update = True
+                update_data["email"] = new_data.email
+            
+            # Update genres (merge)
+            if new_data.genres:
+                merged_genres = list(set(existing.profile.genres + new_data.genres))
+                if len(merged_genres) > len(existing.profile.genres):
+                    should_update = True
+                    update_data["genres"] = merged_genres
+            
+            # Update follower counts (merge)
+            if new_data.follower_counts:
+                merged_followers = {**existing.profile.follower_counts, **new_data.follower_counts}
+                if merged_followers != existing.profile.follower_counts:
+                    should_update = True
+                    update_data["follower_counts"] = merged_followers
+            
+            # Update social links (merge)
+            if new_data.social_links:
+                merged_social = {**existing.profile.social_links, **new_data.social_links}
+                if merged_social != existing.profile.social_links:
+                    should_update = True
+                    update_data["social_links"] = merged_social
+            
+            # Update metadata (merge)
+            if new_data.metadata:
+                merged_metadata = {**existing.profile.metadata, **new_data.metadata}
+                update_data["metadata"] = merged_metadata
+            
+            if should_update:
+                update_data["last_updated"] = datetime.now().isoformat()
+                
+                result = deps.supabase.table("artists").update(
+                    update_data
+                ).eq("id", db_id).execute()
+                
+                if result.data:
+                    logger.info(f"✅ Updated existing artist: {existing.profile.name}")
+                    return result.data[0]
+            else:
+                logger.info(f"ℹ️ No updates needed for artist: {existing.profile.name}")
+                # Return existing data
+                return {
+                    "id": db_id,
+                    **existing.profile.dict()
+                }
+                
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error updating existing artist: {e}")
             return None
             
     async def update_artist_profile(
