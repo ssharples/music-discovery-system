@@ -239,9 +239,15 @@ class DiscoveryOrchestrator:
             
             # Phase 1: YouTube Discovery with quality filtering
             logger.info(f"About to call YouTube discovery with query: {request.search_query}")
-            discovered_channels = await self._discover_youtube_artists_with_quality_filter(
-                deps, request.search_query, request.max_results, session_id
-            )
+            try:
+                discovered_channels = await self._discover_youtube_artists_with_quality_filter(
+                    deps, request.search_query, request.max_results, session_id
+                )
+                logger.info(f"✅ YouTube discovery completed successfully")
+            except Exception as youtube_error:
+                logger.error(f"❌ YouTube discovery failed: {youtube_error}")
+                # Continue with empty list to test rest of pipeline
+                discovered_channels = []
             
             logger.info(f"Discovered {len(discovered_channels)} potential artists after quality filtering")
             if discovered_channels:
@@ -349,9 +355,16 @@ class DiscoveryOrchestrator:
                 return []
             
             logger.info(f"🔍 YouTube discovery starting for query: {query}")
-            discovered_channels = await self.youtube_agent.discover_artists(
-                deps, query, max_results
-            )
+            try:
+                discovered_channels = await self.youtube_agent.discover_artists(
+                    deps, query, max_results
+                )
+                logger.info(f"✅ YouTube agent discover_artists completed")
+            except Exception as discover_error:
+                logger.error(f"❌ YouTube agent discover_artists failed: {discover_error}")
+                logger.error(f"Error type: {type(discover_error).__name__}")
+                logger.error(f"Error details: {str(discover_error)}")
+                return []
             
             if not discovered_channels:
                 logger.warning("⚠️ No channels discovered from YouTube API")

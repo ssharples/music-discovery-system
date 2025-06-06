@@ -10,6 +10,7 @@ from app.models.artist import (
 )
 from app.core.dependencies import get_pipeline_deps, PipelineDependencies
 from app.agents.orchestrator import DiscoveryOrchestrator
+from app.agents.youtube_agent import YouTubeDiscoveryAgent
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -184,4 +185,110 @@ async def get_session_details(
         raise
     except Exception as e:
         logger.error(f"Error fetching session: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/debug/config")
+async def debug_config(
+    deps: PipelineDependencies = Depends(get_pipeline_deps)
+):
+    """Debug endpoint to check configuration and dependencies"""
+    try:
+        from app.core.config import settings
+        
+        config_status = {
+            "youtube_configured": settings.is_youtube_configured(),
+            "deepseek_configured": settings.is_deepseek_configured(),
+            "supabase_configured": bool(settings.SUPABASE_URL and settings.SUPABASE_KEY),
+            "redis_configured": bool(settings.REDIS_URL),
+            "youtube_api_key_present": bool(settings.YOUTUBE_API_KEY),
+            "deepseek_api_key_present": bool(settings.DEEPSEEK_API_KEY),
+        }
+        
+        # Test database connection
+        try:
+            test_result = deps.supabase.table("artists").select("count", count="exact").limit(1).execute()
+            config_status["database_connection"] = "working"
+            config_status["database_error"] = None
+        except Exception as db_error:
+            config_status["database_connection"] = "failed"
+            config_status["database_error"] = str(db_error)
+        
+        # Test Redis connection
+        try:
+            await deps.redis_client.ping()
+            config_status["redis_connection"] = "working"
+            config_status["redis_error"] = None
+        except Exception as redis_error:
+            config_status["redis_connection"] = "failed"
+            config_status["redis_error"] = str(redis_error)
+        
+        # Test quota manager
+        try:
+            from app.core import quota_manager
+            quota_status = await quota_manager.get_quota_status()
+            config_status["quota_manager"] = "working"
+            config_status["quota_status"] = quota_status
+        except Exception as quota_error:
+            config_status["quota_manager"] = "failed"
+            config_status["quota_error"] = str(quota_error)
+        
+        return config_status
+        
+    except Exception as e:
+        logger.error(f"Debug config error: {e}")
+        return {"error": str(e), "type": type(e).__name__}
+
+@router.get("/debug/test-discovery")
+async def test_discovery(
+    deps: PipelineDependencies = Depends(get_pipeline_deps)
+):
+    """Test discovery pipeline components individually"""
+    try:
+        results = {}
+        
+        # Test 1: Basic orchestrator creation
+        try:
+            orchestrator = DiscoveryOrchestrator()
+            results["orchestrator_creation"] = "success"
+        except Exception as e:
+            results["orchestrator_creation"] = f"failed: {e}"
+            return results
+        
+        # Test 2: YouTube agent creation
+        try:
+            youtube_agent = YouTubeDiscoveryAgent()
+            results["youtube_agent_creation"] = "success"
+        except Exception as e:
+            results["youtube_agent_creation"] = f"failed: {e}"
+            return results
+        
+        # Test 3: Quota manager check
+        try:
+            can_search = await orchestrator.quota_manager.can_perform_operation('youtube', 'search', 1)
+            results["quota_check"] = f"can_search: {can_search}"
+        except Exception as e:
+            results["quota_check"] = f"failed: {e}"
+        
+        # Test 4: Simple YouTube search (if configured)
+        try:
+            from app.core.config import settings
+            if settings.is_youtube_configured():
+                search_results = await youtube_agent._search_channels(deps, "test music", 5)
+                results["youtube_search"] = f"success: found {len(search_results)} channels"
+            else:
+                results["youtube_search"] = "skipped: YouTube not configured"
+        except Exception as e:
+            results["youtube_search"] = f"failed: {e}"
+        
+        # Test 5: Storage agent test
+        try:
+            storage_test = await orchestrator.storage_agent.get_high_value_artists(deps, min_score=0.0, limit=1)
+            results["storage_test"] = f"success: got {len(storage_test)} results"
+        except Exception as e:
+            results["storage_test"] = f"failed: {e}"
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Test discovery error: {e}")
+        return {"error": str(e), "type": type(e).__name__} 
