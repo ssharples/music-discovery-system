@@ -178,19 +178,17 @@ class ApifyYouTubeAgent:
                 search_url = f"https://www.youtube.com/results?search_query={keyword.replace(' ', '+')}"
                 start_urls.append(search_url)
             
+            # Try minimal payload first to debug 400 error
             actor_input = {
                 "startUrls": start_urls,
-                "keywords": keywords,  # Also include keywords as per example
-                "maxItems": max_results,
-                "uploadDate": upload_date,
-                "duration": duration,
-                "features": "all",  # Include features parameter
-                "sort": sort_by,
-                "gl": "us",  # Geographic location
-                "hl": "en"   # Language
+                "maxItems": max_results
             }
             
+            # Add other parameters only if minimal works
+            # TODO: Gradually add back other parameters once basic payload works
+            
             logger.info(f"🔍 Starting Apify YouTube search with keywords: {keywords}, max_results: {max_results}")
+            logger.info(f"🐛 DEBUG: Sending actor_input: {actor_input}")
             
             # Start the actor run with retry logic
             run_response = None
