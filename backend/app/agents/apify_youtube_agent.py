@@ -187,9 +187,7 @@ class ApifyYouTubeAgent:
                 "features": "all",  # Include features parameter
                 "sort": sort_by,
                 "gl": "us",  # Geographic location
-                "hl": "en",   # Language
-                "maxRequestRetries": self.max_retries,  # Add retries at actor level
-                "requestTimeoutSecs": self.http_timeout  # Timeout per request
+                "hl": "en"   # Language
             }
             
             logger.info(f"🔍 Starting Apify YouTube search with keywords: {keywords}, max_results: {max_results}")
@@ -934,9 +932,7 @@ class ApifyYouTubeAgent:
                 "features": "all",
                 "sort": "r",
                 "gl": "us",
-                "hl": "en",
-                "maxRequestRetries": self.max_retries,
-                "requestTimeoutSecs": self.http_timeout
+                "hl": "en"
             }
             
             logger.info(f"🔍 Searching by YouTube handles: {handles}")
