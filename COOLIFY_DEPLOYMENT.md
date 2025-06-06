@@ -1,270 +1,269 @@
-# 🚀 Coolify VPS Deployment Guide - Music Discovery System
+# 🚀 Coolify Deployment Guide - Apify Integration
 
-This guide will walk you through deploying your music discovery system on Coolify VPS.
+## Overview
 
-## 📋 Prerequisites
+This guide helps you deploy your music discovery system with Apify YouTube integration on Coolify using Docker Compose.
 
-### What You Need
-- ✅ Coolify instance running on your VPS
-- ✅ GitHub repository with your code
-- ✅ Domain name (optional but recommended)
-- ✅ API keys for all services
+## 🔧 Pre-Deployment Setup
 
-### Required API Keys
-- **DeepSeek API Key** - [Get from DeepSeek Platform](https://platform.deepseek.com/api_keys)
-- **YouTube Data API v3** - [Google Cloud Console](https://console.cloud.google.com/)
-- **Spotify API** - [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
-- **Supabase** - [Supabase Dashboard](https://supabase.com/dashboard)
-- **Firecrawl API** (optional) - [Firecrawl.dev](https://firecrawl.dev)
+### 1. Environment Variables in Coolify
 
-## 🚀 Step-by-Step Deployment
+In your Coolify dashboard, add these environment variables to your application:
 
-### Step 1: Prepare Your Repository
+#### **Required - Apify Integration**
+```bash
+APIFY_API_TOKEN=your_apify_token_here
+```
 
-1. **Push all changes to GitHub:**
-   ```bash
-   git add .
-   git commit -m "feat: add Coolify deployment configuration"
-   git push origin main
+#### **Existing Environment Variables**
+```bash
+# Core Application
+ENVIRONMENT=production
+DEBUG=false
+SECRET_KEY=your_secret_key_here
+ALLOWED_ORIGINS=https://yourdomain.com
+
+# Database & Storage
+SUPABASE_URL=your_supabase_url
+SUPABASE_KEY=your_supabase_key
+
+# AI & Enrichment APIs
+DEEPSEEK_API_KEY=your_deepseek_key
+SPOTIFY_CLIENT_ID=your_spotify_client_id
+SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
+FIRECRAWL_API_KEY=your_firecrawl_key
+
+# Optional - YouTube API (for backward compatibility)
+YOUTUBE_API_KEY=your_youtube_api_key
+
+# Monitoring (optional)
+SENTRY_DSN=your_sentry_dsn
+```
+
+### 2. Get Apify API Token
+
+1. **Sign up**: Go to [Apify.com](https://apify.com/) (free tier available)
+2. **Get Token**: Visit [Console → Integrations](https://console.apify.com/account/integrations)
+3. **Copy Token**: Add to Coolify environment variables as `APIFY_API_TOKEN`
+
+## 📦 Docker Compose Configuration
+
+Your `docker-compose.yml` has been updated to include Apify:
+
+```yaml
+services:
+  backend:
+    build: .
+    environment:
+      - ENVIRONMENT=production
+      - DEBUG=false
+      # Apify YouTube Scraper (replaces YouTube API)
+      - APIFY_API_TOKEN=${APIFY_API_TOKEN}
+      # YouTube API (kept for backward compatibility, optional now)
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - SENTRY_DSN=${SENTRY_DSN}
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    # ... rest of configuration
+```
+
+## 🚀 Deployment Steps
+
+### Step 1: Update Environment Variables
+
+In your Coolify dashboard:
+
+1. **Navigate** to your application
+2. **Go to** Environment Variables section
+3. **Add** the new variable:
+   ```
+   APIFY_API_TOKEN=your_actual_token_here
+   ```
+4. **Save** the configuration
+
+### Step 2: Deploy Updated Application
+
+1. **Commit** your updated `docker-compose.yml` to your repository
+2. **Push** changes to your Git repository
+3. **Trigger** deployment in Coolify (automatic or manual)
+
+### Step 3: Verify Deployment
+
+Monitor the deployment logs for these success indicators:
+
+```bash
+# Backend startup logs should show:
+✅ Orchestrator initialized with lazy agent loading
+✅ Apify YouTube discovery starting for query: ...
+✅ Discovered X quality artists from Y videos
+
+# No more quota errors:
+❌ ❌ Insufficient YouTube quota for search operations (should be gone)
+```
+
+## 🔍 Testing the Deployment
+
+### Health Check
+
+Your application health endpoint should respond:
+```bash
+curl https://yourdomain.com/health
+# Should return: {"status": "healthy"}
+```
+
+### Test Music Discovery
+
+1. **Access** your application frontend
+2. **Start** a music discovery session
+3. **Monitor** logs for Apify activity:
+   ```
+   🔍 Apify YouTube discovery starting for query: indie rock 2024
+   ✅ Discovered 15 quality artists from 50 videos
+   💰 Estimated Apify cost for 50 videos: $0.0250
    ```
 
-2. **Verify required files are present:**
-   - ✅ `Dockerfile` (root level)
-   - ✅ `docker-compose.coolify.yml`
-   - ✅ `deployment/nginx.conf`
-   - ✅ `deployment/supervisord.conf`
-   - ✅ `.dockerignore`
+## 📊 Cost Monitoring
 
-### Step 2: Set Up Supabase Database
+### Apify Console
+- **Dashboard**: https://console.apify.com/account/billing
+- **Real-time usage**: Monitor costs as they accumulate
+- **Billing alerts**: Set up notifications for spending limits
 
-1. **Go to your Supabase project**
-2. **Navigate to SQL Editor**
-3. **Run the database schema:**
-   ```sql
-   -- Copy and paste the contents from your database-schema file
-   ```
-
-### Step 3: Create New Application in Coolify
-
-1. **Login to your Coolify dashboard**
-2. **Click "New Application"**
-3. **Choose "Docker Compose"**
-4. **Configure the application:**
-   - **Name**: `music-discovery-system`
-   - **Git Repository**: Your GitHub repo URL
-   - **Branch**: `main`
-   - **Docker Compose File**: `docker-compose.coolify.yml` (or `docker-compose.coolify-alt.yml` if port 8000 conflicts)
-
-### Step 4: Configure Environment Variables
-
-In Coolify, add these environment variables:
-
-#### **Required API Keys:**
-```bash
-# DeepSeek AI
-DEEPSEEK_API_KEY=your_deepseek_api_key_here
-
-# YouTube API
-YOUTUBE_API_KEY=your_youtube_api_key_here
-
-# Spotify API
-SPOTIFY_CLIENT_ID=your_spotify_client_id_here
-SPOTIFY_CLIENT_SECRET=your_spotify_client_secret_here
-
-# Supabase
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your_supabase_anon_key_here
-
-# Optional: Firecrawl
-FIRECRAWL_API_KEY=your_firecrawl_api_key_here
+### Expected Costs
 ```
+Daily Discovery (typical usage):
+- 100 artists discovery: ~500 videos = $0.25/day
+- 1000 artists discovery: ~5000 videos = $2.50/day
 
-#### **Security & Configuration:**
-```bash
-# Security
-SECRET_KEY=your_super_secure_random_secret_key_here
-
-# CORS (replace with your domain)
-ALLOWED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
-
-# Optional: Error Tracking
-SENTRY_DSN=https://your-sentry-dsn@sentry.io/project-id
+Monthly costs significantly lower than YouTube API quota overages!
 ```
-
-#### **How to Generate SECRET_KEY:**
-```bash
-python3 -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-### Step 5: Configure Domain (Optional)
-
-1. **In Coolify, go to your application**
-2. **Click "Domains"**
-3. **Add your domain**: `yourdomain.com`
-4. **Enable SSL**: Coolify will auto-generate Let's Encrypt certificate
-
-### Step 6: Deploy
-
-1. **Click "Deploy" in Coolify**
-2. **Monitor the build logs**
-3. **Wait for deployment to complete** (usually 3-5 minutes)
-
-### Step 7: Verify Deployment
-
-1. **Check application status**: Should show "Running"
-2. **Visit your domain** or Coolify-provided URL
-3. **Test the API**: `https://yourdomain.com/api/health`
-4. **Check logs** if needed: Click "Logs" in Coolify
-
-## ⚠️ **Port Conflict Resolution**
-
-**Port 80 Conflict** (most common):
-- Use `docker-compose.coolify.yml` (port 8080)
-- Your app will be accessible on:
-  - **Frontend**: `http://yourserver:8080`
-  - **API**: `http://yourserver:3001`
-
-**Port 8080 Also Taken:**
-- Use `docker-compose.coolify-port3000.yml` instead
-- Your app will be accessible on:
-  - **Frontend**: `http://yourserver:3000`
-  - **API**: `http://yourserver:3001`
-
-**Original Port 8000 Conflict:**
-- Use `docker-compose.coolify-alt.yml`
-- **API**: Port 3001 (instead of 8000)
-
-**No changes needed to your application code** - only the external port mapping changes.
-
-## 🔧 Configuration Details
-
-### Dockerfile Options
-
-There are two Dockerfile options available:
-
-1. **`Dockerfile`** - Multi-stage build (recommended)
-   - More efficient, smaller image size
-   - Builds frontend in separate stage
-
-2. **`Dockerfile.coolify`** - Single-stage build (fallback)
-   - Simpler, more reliable for some environments
-   - Use if multi-stage build fails
-
-### Dockerfile Architecture
-The deployment uses a multi-stage build:
-- **Stage 1**: Prepares frontend assets
-- **Stage 2**: Sets up Python backend + Nginx + Redis
-- **Supervisor**: Manages all processes
-
-### Services Running
-- **Nginx** (Port 80): Serves frontend + proxies API
-- **FastAPI Backend** (Port 8000): Python API server
-- **Redis**: In-memory caching and task queue
-
-### Health Monitoring
-- **Health endpoint**: `/health`
-- **Automatic restarts**: If any service fails
-- **Log aggregation**: All logs in Coolify dashboard
 
 ## 🛠️ Troubleshooting
 
 ### Common Issues
 
-#### ❌ Build Fails
+#### 1. **Missing APIFY_API_TOKEN**
 ```bash
-# Check build logs in Coolify
-# Common causes:
-- Missing environment variables
-- API key format issues
-- Network connectivity during build
-- Frontend dist directory not found
+# Error in logs:
+❌ APIFY_API_TOKEN not configured - cannot perform discovery
+
+# Solution:
+Add APIFY_API_TOKEN to Coolify environment variables
 ```
 
-**Specific Error: "frontend/dist: not found"**
+#### 2. **Invalid Apify Token**
 ```bash
-# This means the frontend/dist directory is missing
-# Solutions:
-1. Ensure frontend/dist/index.html is committed to git
-2. Try using Dockerfile.coolify instead of Dockerfile
-3. Check .gitignore doesn't exclude dist/ directory
+# Error in logs:
+❌ Failed to start Apify actor run: Unauthorized
+
+# Solution:
+Verify token at: https://console.apify.com/account/integrations
+Update APIFY_API_TOKEN with correct value
 ```
 
-#### ❌ Application Won't Start
+#### 3. **Container Build Issues**
 ```bash
-# Check application logs in Coolify
-# Common causes:
-- Invalid Supabase URL/keys
-- Missing required environment variables
-- Port conflicts
+# Error during build:
+ModuleNotFoundError: No module named 'httpx'
+
+# Solution:
+httpx is already in requirements.txt - rebuild container
 ```
 
-#### ❌ API Returns 500 Errors
+### Debug Commands
+
+Check environment variables in running container:
 ```bash
-# Check backend logs specifically
-# Common causes:
-- Database connection issues
-- Invalid API keys
-- Missing Redis connection
+# In Coolify terminal
+docker exec -it <container_id> env | grep APIFY
 ```
 
-### Quick Fixes
-
-#### **Reset Application:**
+Test Apify connection:
 ```bash
-# In Coolify:
-1. Stop application
-2. Clear build cache
-3. Redeploy
+# In container
+python -c "
+import os
+print('Token:', os.getenv('APIFY_API_TOKEN', 'NOT SET'))
+"
 ```
 
-#### **Update Environment Variables:**
-```bash
-# In Coolify:
-1. Go to Environment Variables
-2. Update values
-3. Restart application
+## 🔄 Migration from YouTube API
+
+### Automatic Migration Benefits
+
+Since you're deploying with the updated code:
+
+✅ **No Downtime**: Apify agent is drop-in compatible  
+✅ **Instant Benefits**: No more quota limitations  
+✅ **Cost Savings**: $0.50/1K videos vs quota overages  
+✅ **Better Performance**: 10+ videos/second processing  
+
+### Rollback Plan (if needed)
+
+1. **Revert** `docker-compose.yml` to remove Apify
+2. **Update** orchestrator to use original YouTube agent
+3. **Redeploy** via Coolify
+
+## 🎯 Production Optimization
+
+### Scaling Considerations
+
+```yaml
+# For high-volume production
+backend:
+  command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+  deploy:
+    resources:
+      limits:
+        memory: 2G
+        cpus: "1.0"
 ```
 
-#### **Check Service Status:**
-```bash
-# SSH into your VPS and run:
-docker ps | grep music-discovery
-docker logs <container-id>
+### Cost Management
+
+```python
+# Add cost controls in production
+class ApifyYouTubeAgent:
+    def __init__(self):
+        # Production cost limits
+        self.daily_spend_limit = float(os.getenv('APIFY_DAILY_LIMIT', '10.0'))
+        self.max_videos_per_session = int(os.getenv('APIFY_MAX_VIDEOS', '1000'))
 ```
 
-## 📈 Post-Deployment
+## 📋 Deployment Checklist
 
-### Performance Optimization
-- **Monitor CPU/Memory** usage in Coolify
-- **Scale horizontally** if needed (add more containers)
-- **Enable CDN** for static assets
+- [ ] Apify API token obtained
+- [ ] `APIFY_API_TOKEN` added to Coolify environment
+- [ ] Updated `docker-compose.yml` committed
+- [ ] Application deployed successfully
+- [ ] Health check passes
+- [ ] Music discovery works without quota errors
+- [ ] Apify billing dashboard monitored
+- [ ] Cost alerts configured
 
-### Security
-- **Regular updates**: Keep dependencies updated
-- **SSL certificate**: Auto-renewed by Coolify
-- **Firewall**: Ensure only necessary ports are open
+## 🎉 Success Indicators
 
-### Monitoring
-- **Application logs**: Available in Coolify dashboard
-- **Error tracking**: If Sentry is configured
-- **Uptime monitoring**: Consider external services
+Your deployment is successful when you see:
 
-## 🎯 Success Checklist
+```bash
+✅ No YouTube quota errors
+✅ Apify discovery logs appearing
+✅ Artists being discovered consistently
+✅ Predictable costs ($0.50/1K videos)
+✅ 97% success rate maintained
+```
 
-After deployment, verify:
-- ✅ Frontend loads at your domain
-- ✅ API health check returns 200: `/api/health`
-- ✅ Can search for artists
-- ✅ Database connections work
-- ✅ All environment variables are set
-- ✅ SSL certificate is active (if domain configured)
+---
 
-## 🆘 Getting Help
-
-If you encounter issues:
-1. **Check Coolify logs** first
-2. **Verify environment variables** are correctly set
-3. **Test API endpoints** individually
-4. **Check database connectivity** in Supabase dashboard
-
-Your music discovery system should now be live and accessible! 🎉 
+**Support**: 
+- Coolify: [Coolify Documentation](https://coolify.io/docs)
+- Apify: apidojo10@gmail.com
+- Application: Your development team 

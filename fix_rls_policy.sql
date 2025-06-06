@@ -36,7 +36,8 @@ CREATE OR REPLACE FUNCTION trigger_update_enrichment_score_safe()
 RETURNS TRIGGER AS $$
 BEGIN
   -- Only update enrichment score if it's not already set (avoid recursion)
-  IF NEW.enrichment_score = 0.0 OR OLD.enrichment_score IS NULL THEN
+  -- For INSERT triggers, there's no OLD record, only NEW
+  IF NEW.enrichment_score = 0.0 OR NEW.enrichment_score IS NULL THEN
     PERFORM update_enrichment_score(NEW.id);
   END IF;
   RETURN NEW;

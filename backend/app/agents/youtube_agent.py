@@ -4,6 +4,7 @@ from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from typing import List, Optional, Dict, Any
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from googleapiclient.discovery import build
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -374,6 +375,17 @@ class YouTubeDiscoveryAgent:
         for i in range(0, len(channels), batch_size):
             batch = channels[i:i + batch_size]
             batch_results = await self._enrich_channel_batch(deps, batch)
+            
+            # Extract artist names from video titles for each channel
+            for channel in batch_results:
+                extracted_artist_name = self._extract_artist_name_from_videos(channel)
+                if extracted_artist_name:
+                    channel['extracted_artist_name'] = extracted_artist_name
+                    logger.info(f"🎤 Extracted artist name: '{extracted_artist_name}' from channel '{channel.get('channel_title')}'")
+                else:
+                    channel['extracted_artist_name'] = channel.get('channel_title', 'Unknown Artist')
+                    logger.debug(f"🔍 Using channel title as artist name: '{channel['extracted_artist_name']}'")
+            
             enriched_channels.extend(batch_results)
             
             # Rate limiting between batches
@@ -381,6 +393,172 @@ class YouTubeDiscoveryAgent:
                 await asyncio.sleep(1)
         
         return enriched_channels
+    
+    def _extract_artist_name_from_videos(self, channel_data: Dict[str, Any]) -> Optional[str]:
+        """Extract the most likely artist name from video titles"""
+        
+        qualifying_videos = channel_data.get('qualifying_videos', [])
+        if not qualifying_videos:
+            return None
+        
+        video_titles = [video.get('title', '') for video in qualifying_videos]
+        
+        # Common patterns for music video titles
+        artist_name_candidates = []
+        
+        for title in video_titles:
+            if not title:
+                continue
+            
+            # Pattern 1: "Artist Name - Song Title" (most common)
+            if ' - ' in title:
+                potential_artist = title.split(' - ')[0].strip()
+                if potential_artist and not self._is_likely_not_artist_name(potential_artist):
+                    artist_name_candidates.append(potential_artist)
+            
+            # Pattern 2: "Artist Name | Song Title"
+            elif ' | ' in title:
+                potential_artist = title.split(' | ')[0].strip()
+                if potential_artist and not self._is_likely_not_artist_name(potential_artist):
+                    artist_name_candidates.append(potential_artist)
+            
+            # Pattern 3: "Song Title by Artist Name"
+            elif ' by ' in title.lower():
+                parts = title.lower().split(' by ')
+                if len(parts) >= 2:
+                    potential_artist = parts[-1].strip()
+                    if potential_artist and not self._is_likely_not_artist_name(potential_artist):
+                        artist_name_candidates.append(potential_artist.title())
+            
+            # Pattern 4: "Artist Name: Song Title"
+            elif ': ' in title:
+                potential_artist = title.split(': ')[0].strip()
+                if potential_artist and not self._is_likely_not_artist_name(potential_artist):
+                    artist_name_candidates.append(potential_artist)
+            
+            # Pattern 5: Remove common prefixes/suffixes and use first part
+            else:
+                cleaned_title = self._clean_video_title(title)
+                if cleaned_title and not self._is_likely_not_artist_name(cleaned_title):
+                    artist_name_candidates.append(cleaned_title)
+        
+        if not artist_name_candidates:
+            return None
+        
+        # Find the most common artist name candidate
+        from collections import Counter
+        name_counts = Counter(artist_name_candidates)
+        most_common_name = name_counts.most_common(1)[0][0] if name_counts else None
+        
+        # Validate the extracted name
+        if most_common_name and self._validate_artist_name(most_common_name):
+            return most_common_name
+        
+        return None
+    
+    def _clean_video_title(self, title: str) -> str:
+        """Clean video title to extract potential artist name"""
+        import re
+        
+        # Remove common music video indicators
+        patterns_to_remove = [
+            r'\(official.*?\)',
+            r'\[official.*?\]',
+            r'\(music.*?\)',
+            r'\[music.*?\]',
+            r'\(audio.*?\)',
+            r'\[audio.*?\]',
+            r'\(video.*?\)',
+            r'\[video.*?\]',
+            r'\(lyric.*?\)',
+            r'\[lyric.*?\]',
+            r'\(feat\..*?\)',
+            r'\[feat\..*?\]',
+            r'\(ft\..*?\)',
+            r'\[ft\..*?\]',
+            r'official',
+            r'music video',
+            r'official video',
+            r'official audio',
+            r'lyric video'
+        ]
+        
+        cleaned = title.lower()
+        for pattern in patterns_to_remove:
+            cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+        
+        # Remove extra whitespace and title case
+        cleaned = ' '.join(cleaned.split()).title()
+        
+        # Take first meaningful part (before common separators)
+        for separator in [' - ', ' | ', ': ', ' (', ' [']:
+            if separator in cleaned:
+                cleaned = cleaned.split(separator)[0].strip()
+                break
+        
+        return cleaned if len(cleaned) > 2 else ""
+    
+    def _is_likely_not_artist_name(self, name: str) -> bool:
+        """Check if a string is likely NOT an artist name"""
+        if not name or len(name.strip()) < 2:
+            return True
+        
+        name_lower = name.lower().strip()
+        
+        # Common non-artist terms
+        non_artist_terms = [
+            'official', 'music', 'video', 'audio', 'lyric', 'lyrics', 
+            'feat', 'featuring', 'ft', 'remix', 'cover', 'live',
+            'new', 'latest', 'best', 'top', 'album', 'single',
+            'song', 'track', 'ep', 'mixtape', 'full', 'hd', 'hq',
+            'youtube', 'vevo', 'records', 'entertainment', 'production',
+            'the official', 'music video', 'official video'
+        ]
+        
+        # Check if the name is just common terms
+        if name_lower in non_artist_terms:
+            return True
+        
+        # Check if it starts/ends with common non-artist patterns
+        if (name_lower.startswith(('official ', 'new ', 'latest ')) or 
+            name_lower.endswith((' official', ' music', ' video', ' audio', ' records'))):
+            return True
+        
+        # Check for excessive length (likely description, not name)
+        if len(name) > 50:
+            return True
+        
+        # Check for numbers/years that suggest it's not an artist name
+        if re.match(r'^\d{4}$', name.strip()):  # Just a year
+            return True
+        
+        return False
+    
+    def _validate_artist_name(self, name: str) -> bool:
+        """Validate that the extracted name looks like a real artist name"""
+        if not name or len(name.strip()) < 2:
+            return False
+        
+        name = name.strip()
+        
+        # Basic validation rules
+        # Should not be all numbers
+        if name.isdigit():
+            return False
+        
+        # Should not be excessively long
+        if len(name) > 40:
+            return False
+        
+        # Should contain at least one letter
+        if not re.search(r'[a-zA-Z]', name):
+            return False
+        
+        # Should not be common YouTube/music terms
+        if self._is_likely_not_artist_name(name):
+            return False
+        
+        return True
     
     async def _enrich_channel_batch(
         self,

@@ -16,7 +16,7 @@ from app.models.artist import (
     DiscoveryRequest, ArtistProfile, VideoMetadata, 
     LyricAnalysis, EnrichedArtistData
 )
-from app.agents.youtube_agent import YouTubeDiscoveryAgent
+from app.agents.apify_youtube_agent import ApifyYouTubeAgent
 from app.agents.enhanced_enrichment_agent_simple import get_simple_enhanced_enrichment_agent
 from app.agents.lyrics_agent import get_lyrics_agent
 from app.agents.storage_agent import StorageAgent
@@ -58,7 +58,7 @@ class DiscoveryOrchestrator:
     """Main orchestrator for the discovery pipeline with intelligent coordination"""
     
     def __init__(self):
-        self.youtube_agent = YouTubeDiscoveryAgent()
+        self.youtube_agent = ApifyYouTubeAgent()
         self._enrichment_agent = None
         self._lyrics_agent = None
         self._ai_detection_agent = None
@@ -177,25 +177,23 @@ class DiscoveryOrchestrator:
     ) -> bool:
         """Validate that sufficient API quota is available for the request"""
         try:
-            # Estimate quota requirements
-            estimated_youtube_searches = 1
-            estimated_video_lookups = request.max_results * 5
-            estimated_caption_requests = request.max_results * 2
-            
-            # Check YouTube quota
-            if not await self.quota_manager.can_perform_operation(
-                'youtube', 'search', estimated_youtube_searches
-            ):
-                logger.error("❌ Insufficient YouTube quota for search operations")
+            # Check if Apify is configured
+            if not self.youtube_agent.apify_api_token:
+                logger.error("❌ APIFY_API_TOKEN not configured - cannot perform discovery")
                 return False
             
-            if not await self.quota_manager.can_perform_operation(
-                'youtube', 'videos', estimated_video_lookups
-            ):
-                logger.warning("⚠️ Limited YouTube quota for video operations")
-                # Continue but with reduced scope
+            # Estimate Apify costs
+            estimated_videos = request.max_results
+            estimated_cost = self.youtube_agent.get_cost_estimate(estimated_videos)
             
-            logger.info("✅ Quota validation passed")
+            logger.info(f"💰 Estimated Apify cost for {estimated_videos} videos: ${estimated_cost:.4f}")
+            
+            # For now, allow all requests - add billing limits if needed
+            if estimated_cost > 10.0:  # $10 safety limit
+                logger.warning(f"⚠️ High estimated cost: ${estimated_cost:.2f}")
+                # You could add budget checks here
+            
+            logger.info("✅ Apify quota validation passed")
             return True
             
         except Exception as e:
@@ -277,7 +275,8 @@ class DiscoveryOrchestrator:
             
             for i, channel_data in enumerate(discovered_channels, 1):
                 try:
-                    artist_name = channel_data.get('channel_title', 'Unknown Artist')
+                    artist_name = channel_data.get('extracted_artist_name') or channel_data.get('channel_title', 'Unknown Artist')
+                    channel_title = channel_data.get('channel_title', 'Unknown Artist')
                     channel_id = channel_data.get('channel_id')
                     
                     # Deduplication check
@@ -363,12 +362,12 @@ class DiscoveryOrchestrator:
         """YouTube discovery with intelligent quality filtering"""
         
         try:
-            # Check quota before proceeding
-            if not await self.quota_manager.can_perform_operation('youtube', 'search', 1):
-                logger.error("❌ Insufficient YouTube quota for search")
+            # Apify doesn't use YouTube API quotas - just check if configured
+            if not self.youtube_agent.apify_api_token:
+                logger.error("❌ APIFY_API_TOKEN not configured")
                 return []
             
-            logger.info(f"🔍 YouTube discovery starting for query: {query}")
+            logger.info(f"🔍 Apify YouTube discovery starting for query: {query}")
             try:
                 discovered_channels = await self.youtube_agent.discover_artists(
                     deps, query, max_results
@@ -451,8 +450,16 @@ class DiscoveryOrchestrator:
     ) -> Optional[EnrichedArtistData]:
         """Process artist with comprehensive quality checks and retry logic"""
         
-        artist_name = channel_data.get('channel_title', 'Unknown Artist')
+        # Use extracted artist name from video titles if available, otherwise fall back to channel title
+        artist_name = channel_data.get('extracted_artist_name') or channel_data.get('channel_title', 'Unknown Artist')
+        channel_title = channel_data.get('channel_title', 'Unknown Artist')
         channel_id = channel_data.get('channel_id')
+        
+        # Log the artist name selection for debugging
+        if channel_data.get('extracted_artist_name'):
+            logger.info(f"🎤 Using extracted artist name: '{artist_name}' (Channel: '{channel_title}')")
+        else:
+            logger.info(f"🔍 Using channel title as artist name: '{artist_name}'")
         
         try:
             # Check if artist already exists in database
@@ -465,13 +472,14 @@ class DiscoveryOrchestrator:
             profile_id = uuid4()
             base_profile = ArtistProfile(
                 id=profile_id,
-                name=artist_name,
+                name=artist_name,  # Use the extracted/corrected artist name
                 youtube_channel_id=channel_id,
-                youtube_channel_name=artist_name,
+                youtube_channel_name=channel_title,  # Keep original channel name for reference
                 metadata={
                     "discovery_session_id": str(session_id),
                     "youtube_data": channel_data,
-                    "processed_at": datetime.now().isoformat()
+                    "processed_at": datetime.now().isoformat(),
+                    "artist_name_source": "extracted_from_video_titles" if channel_data.get('extracted_artist_name') else "channel_title"
                 }
             )
             
