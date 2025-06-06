@@ -1,6 +1,6 @@
 """
 Apify YouTube Agent - Alternative to official YouTube API
-Uses apidojo/youtube-scraper actor to bypass quota limitations
+Uses apidojo/youtube-scraper actor (ID: 1p1aa7gcSydPkAE0d) to bypass quota limitations
 """
 
 import os
@@ -18,7 +18,13 @@ logger = logging.getLogger(__name__)
 
 class ApifyYouTubeAgent:
     """
-    YouTube agent using Apify's youtube-scraper actor
+    YouTube agent using Apify's apidojo/youtube-scraper actor (ID: 1p1aa7gcSydPkAE0d)
+    
+    Supports multiple input types as per official example:
+    - startUrls: YouTube search URLs, video URLs, channel URLs, etc.
+    - keywords: Search terms for YouTube search
+    - youtubeHandles: Channel handles like @MrBeast
+    
     Cost: $0.50 per 1,000 videos (much cheaper than quota issues)
     Success rate: 97%
     
@@ -27,7 +33,7 @@ class ApifyYouTubeAgent:
     
     def __init__(self):
         self.apify_api_token = settings.APIFY_API_TOKEN or os.getenv('APIFY_API_TOKEN')
-        self.actor_id = "apidojo~youtube-scraper"  # The actor we analyzed
+        self.actor_id = "1p1aa7gcSydPkAE0d"  # Official apidojo/youtube-scraper actor ID
         self.base_url = "https://api.apify.com/v2"
         
         # Use configured timeouts
@@ -158,12 +164,20 @@ class ApifyYouTubeAgent:
         max_results = min(max_results, 100)  # Cap at 100 to prevent timeouts
         
         try:
-            # Prepare input for the apidojo~youtube-scraper actor with timeout-friendly settings
+            # Prepare input for the apidojo/youtube-scraper actor following official example
+            # Convert keywords to search URLs as shown in the official example
+            start_urls = []
+            for keyword in keywords:
+                search_url = f"https://www.youtube.com/results?search_query={keyword.replace(' ', '+')}"
+                start_urls.append(search_url)
+            
             actor_input = {
-                "keywords": keywords,
+                "startUrls": start_urls,
+                "keywords": keywords,  # Also include keywords as per example
                 "maxItems": max_results,
                 "uploadDate": upload_date,
                 "duration": duration,
+                "features": "all",  # Include features parameter
                 "sort": sort_by,
                 "gl": "us",  # Geographic location
                 "hl": "en",   # Language
@@ -236,6 +250,10 @@ class ApifyYouTubeAgent:
             actor_input = {
                 "startUrls": channel_urls,
                 "maxItems": max_videos_per_channel * len(channel_urls),
+                "uploadDate": "all",
+                "duration": "all", 
+                "features": "all",
+                "sort": "r",
                 "gl": "us",
                 "hl": "en"
             }
@@ -274,9 +292,15 @@ class ApifyYouTubeAgent:
             return []
         
         try:
+            # Use trending search URL as shown in official examples
+            trending_urls = ["https://www.youtube.com/feed/trending"]
             actor_input = {
-                "getTrending": True,
+                "startUrls": trending_urls,
                 "maxItems": max_results,
+                "uploadDate": "all",
+                "duration": "all",
+                "features": "all", 
+                "sort": "r",
                 "gl": "us",
                 "hl": "en"
             }
@@ -686,4 +710,61 @@ class ApifyYouTubeAgent:
         final_videos = list(unique_videos.values())[:max_results]
         logger.info(f"🎯 Batch discovery completed: {len(final_videos)} unique videos")
         
-        return final_videos 
+        return final_videos
+    
+    async def search_by_handles(self, handles: List[str], max_results: int = 50) -> List[Dict[str, Any]]:
+        """
+        Search for content by YouTube handles (e.g., @MrBeast)
+        Following the official apidojo example format
+        
+        Args:
+            handles: List of YouTube handles (e.g., ["@MrBeast", "@gordonramsay"])
+            max_results: Maximum number of videos to return
+            
+        Returns:
+            List of video data dictionaries
+        """
+        if not self.apify_api_token:
+            logger.error("❌ Cannot search by handles - APIFY_API_TOKEN not configured")
+            return []
+        
+        try:
+            # Use official example format
+            actor_input = {
+                "youtubeHandles": handles,
+                "maxItems": max_results,
+                "uploadDate": "month",
+                "duration": "all",
+                "features": "all",
+                "sort": "r",
+                "gl": "us",
+                "hl": "en",
+                "maxRequestRetries": self.max_retries,
+                "requestTimeoutSecs": self.http_timeout
+            }
+            
+            logger.info(f"🔍 Searching by YouTube handles: {handles}")
+            
+            # Start the actor run
+            run_response = await self._start_actor_run(actor_input)
+            if not run_response:
+                logger.error("❌ Failed to start actor run for handles search")
+                return []
+            
+            run_id = run_response['data']['id']
+            logger.info(f"✅ Started Apify actor run: {run_id}")
+            
+            # Wait for completion and get results
+            results = await self._wait_for_completion_and_get_results(run_id, max_wait_time=self.actor_timeout)
+            
+            if results:
+                processed_results = self._process_video_results(results)
+                logger.info(f"✅ Successfully scraped {len(processed_results)} videos from handles: {handles}")
+                return processed_results
+            else:
+                logger.warning("⚠️ No results returned from handles search")
+                return []
+                
+        except Exception as e:
+            logger.error(f"❌ Error searching by handles: {str(e)}")
+            return [] 
