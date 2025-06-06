@@ -185,7 +185,7 @@ class ApifyYouTubeAgent:
                 "uploadDate": upload_date,
                 "duration": duration,
                 "features": "all",  # Include features parameter
-                "sort": "r" if sort_by == "relevance" else "d" if sort_by == "date" else "r",
+                "sort": "r" if sort_by == "relevance" else "u" if sort_by == "date" else "r",
                 "gl": "us",  # Geographic location
                 "hl": "en"   # Language
             }
