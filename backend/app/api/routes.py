@@ -50,6 +50,33 @@ async def start_discovery(
         logger.error(f"❌ Error starting discovery: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/discover/undiscovered-talent")
+async def discover_undiscovered_talent(
+    max_results: int = 50,
+    deps: PipelineDependencies = Depends(get_pipeline_deps)
+):
+    """
+    Discover undiscovered talent with specific criteria:
+    - Official music videos uploaded in the last 24 hours
+    - Videos with less than 50k views
+    - Independent/unsigned artists
+    """
+    logger.info(f"🎯 Undiscovered talent discovery request: max_results={max_results}")
+    
+    try:
+        orchestrator = DiscoveryOrchestrator()
+        result = await orchestrator.discover_undiscovered_talent(
+            deps=deps,
+            max_results=max_results
+        )
+        
+        logger.info(f"✅ Undiscovered talent discovery completed: {result['data']['total_found']} artists found")
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Error in undiscovered talent discovery: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/artists", response_model=List[ArtistProfile])
 async def get_artists(
     skip: int = 0,

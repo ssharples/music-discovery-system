@@ -170,6 +170,136 @@ class DiscoveryOrchestrator:
         
         return session_id
     
+    async def discover_undiscovered_talent(
+        self,
+        deps: PipelineDependencies,
+        max_results: int = 50
+    ) -> Dict[str, Any]:
+        """
+        Specialized discovery for undiscovered talent
+        
+        Searches for:
+        - Official music videos uploaded in the last 24 hours
+        - Videos with less than 50k views
+        - Independent/unsigned artists
+        
+        Args:
+            deps: Pipeline dependencies
+            max_results: Maximum number of artists to return
+            
+        Returns:
+            Dictionary with discovery results and metadata
+        """
+        start_time = time.time()
+        logger.info(f"🎯 Starting undiscovered talent discovery (max_results: {max_results})")
+        
+        try:
+            # Call the specialized discovery method from Apify agent
+            logger.info("🔍 Searching for undiscovered artists with recent uploads...")
+            raw_videos = await self.youtube_agent.discover_undiscovered_artists(max_results=max_results * 2)
+            
+            if not raw_videos:
+                logger.warning("⚠️ No undiscovered artists found")
+                return {
+                    "status": "success",
+                    "message": "No undiscovered artists found in recent uploads",
+                    "data": {
+                        "query": "undiscovered talent discovery",
+                        "total_found": 0,
+                        "artists": [],
+                        "execution_time": time.time() - start_time,
+                        "discovery_criteria": "24h uploads, <50k views, independent artists"
+                    }
+                }
+            
+            logger.info(f"📊 Found {len(raw_videos)} potential undiscovered artist videos")
+            
+            # Convert videos to artist channel data for processing
+            channel_groups = {}
+            for video in raw_videos:
+                channel_id = video.get('channel_id', video.get('channel_title', ''))
+                if channel_id not in channel_groups:
+                    channel_groups[channel_id] = {
+                        'channel_title': video.get('channel_title', 'Unknown Artist'),
+                        'channel_id': channel_id,
+                        'channel_url': video.get('channel_url', ''),
+                        'videos': [],
+                        'total_views': 0,
+                        'avg_views': 0,
+                        'undiscovered_score': video.get('undiscovered_score', 0)
+                    }
+                
+                channel_groups[channel_id]['videos'].append(video)
+                channel_groups[channel_id]['total_views'] += video.get('view_count', 0)
+            
+            # Calculate averages for each channel
+            discovered_channels = []
+            for channel_data in channel_groups.values():
+                if channel_data['videos']:
+                    channel_data['avg_views'] = channel_data['total_views'] / len(channel_data['videos'])
+                    channel_data['video_count'] = len(channel_data['videos'])
+                    discovered_channels.append(channel_data)
+            
+            logger.info(f"🎭 Grouped into {len(discovered_channels)} unique artist channels")
+            
+            # Process artists through enrichment pipeline
+            enriched_artists = []
+            for i, channel_data in enumerate(discovered_channels, 1):
+                try:
+                    logger.info(f"Processing undiscovered artist {i}/{len(discovered_channels)}: {channel_data.get('channel_title')}")
+                    
+                    enriched_artist = await self._process_artist_with_quality_checks(
+                        deps, channel_data, None  # No session ID for direct API call
+                    )
+                    
+                    if enriched_artist and enriched_artist.enrichment_score >= 0.2:  # Lower threshold for undiscovered
+                        enriched_artists.append(enriched_artist)
+                        logger.info(f"✅ Undiscovered artist added: {enriched_artist.name} (score: {enriched_artist.enrichment_score:.2f})")
+                    
+                    # Small delay to avoid rate limits
+                    await asyncio.sleep(0.3)
+                    
+                except Exception as e:
+                    logger.error(f"❌ Failed to process undiscovered artist: {e}")
+                    continue
+            
+            # Calculate costs
+            discovery_cost = self.youtube_agent.get_cost_estimate(len(raw_videos))
+            
+            logger.info(f"🎉 Undiscovered talent discovery complete! Found {len(enriched_artists)} artists")
+            
+            return {
+                "status": "success",
+                "message": f"Successfully discovered {len(enriched_artists)} undiscovered artists",
+                "data": {
+                    "query": "undiscovered talent discovery",
+                    "total_found": len(enriched_artists),
+                    "artists": [artist.to_dict() for artist in enriched_artists],
+                    "execution_time": time.time() - start_time,
+                    "discovery_criteria": "24h uploads, <50k views, independent artists",
+                    "pipeline_stats": {
+                        "videos_analyzed": len(raw_videos),
+                        "channels_found": len(discovered_channels),
+                        "enriched_artists": len(enriched_artists),
+                        "estimated_cost": f"${discovery_cost:.4f}"
+                    }
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Undiscovered talent discovery error: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Undiscovered talent discovery failed: {str(e)}",
+                "data": {
+                    "query": "undiscovered talent discovery",
+                    "total_found": 0,
+                    "artists": [],
+                    "execution_time": time.time() - start_time,
+                    "error": str(e)
+                }
+            }
+    
     async def _validate_quota_availability(
         self,
         deps: PipelineDependencies,

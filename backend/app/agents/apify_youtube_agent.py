@@ -55,10 +55,12 @@ class ApifyYouTubeAgent:
         max_results: int = 50
     ) -> List[Dict[str, Any]]:
         """
-        Discover artists using Apify YouTube scraper with fallback for timeouts
+        Discover artists using Apify YouTube scraper with special focus on undiscovered talent
         
         This method matches the interface of YouTubeDiscoveryAgent.discover_artists()
         and returns the same data structure expected by the orchestrator.
+        
+        For optimal undiscovered artist discovery, use 'official music video' as query
         """
         if not self.apify_api_token:
             logger.error("❌ Cannot discover artists - APIFY_API_TOKEN not configured")
@@ -67,18 +69,23 @@ class ApifyYouTubeAgent:
         try:
             logger.info(f"🔍 Discovering artists via Apify for query: '{query}', max_results: {max_results}")
             
-            # Try main search first
-            videos = await self.search_music_content(
-                keywords=[query],
-                max_results=max_results,
-                upload_date="month",  # Focus on recent content
-                sort_by="relevance"
-            )
-            
-            # If main search fails or returns no results, try smaller searches
-            if not videos and max_results > 20:
-                logger.info("🔄 Main search failed, trying smaller batch searches...")
-                videos = await self._discover_with_smaller_batches(query, max_results)
+            # Check if this is a request for undiscovered talent discovery
+            if 'official music video' in query.lower() or 'undiscovered' in query.lower() or 'new talent' in query.lower():
+                logger.info("🎯 Using specialized undiscovered artist discovery")
+                videos = await self.discover_undiscovered_artists(max_results=max_results * 2)
+            else:
+                # Standard search with optimization for recent content
+                videos = await self.search_music_content(
+                    keywords=[query],
+                    max_results=max_results,
+                    upload_date="today",  # Focus on very recent content (24 hours)
+                    sort_by="date"  # Sort by newest first
+                )
+                
+                # If main search fails or returns no results, try smaller searches
+                if not videos and max_results > 20:
+                    logger.info("🔄 Main search failed, trying smaller batch searches...")
+                    videos = await self._discover_with_smaller_batches(query, max_results)
             
             if not videos:
                 logger.warning("⚠️ No videos returned from Apify YouTube scraper")
@@ -87,7 +94,7 @@ class ApifyYouTubeAgent:
             # Convert video data to channel data (group by channel)
             channel_data = self._convert_videos_to_channels(videos)
             
-            # Apply quality filters and scoring
+            # Apply quality filters and scoring (with emphasis on emerging artists)
             filtered_channels = await self._apply_quality_filters(channel_data)
             
             logger.info(f"✅ Discovered {len(filtered_channels)} quality artists from {len(videos)} videos")
@@ -415,7 +422,7 @@ class ApifyYouTubeAgent:
         return filtered_channels
     
     def _calculate_emerging_artist_score(self, channel: Dict[str, Any]) -> float:
-        """Calculate emerging artist score for a channel"""
+        """Calculate emerging artist score for a channel with focus on undiscovered talent"""
         score = 0.0
         
         try:
@@ -423,13 +430,25 @@ class ApifyYouTubeAgent:
             avg_views = channel.get('avg_views', 0)
             video_count = channel.get('video_count', 0)
             
-            # Emerging artist sweet spot: 1K - 100K views per video
-            if 1000 <= avg_views <= 100000:
-                score += 0.4  # Higher weight for emerging artist range
-            elif 100 <= avg_views < 1000:
-                score += 0.2  # Some potential
-            elif avg_views > 100000:
-                score += 0.1  # Might be too established
+            # Check if any videos have undiscovered scores (from undiscovered artist discovery)
+            videos = channel.get('videos', [])
+            undiscovered_scores = [v.get('undiscovered_score', 0) for v in videos if v.get('undiscovered_score')]
+            
+            if undiscovered_scores:
+                # If we have undiscovered scores, use them heavily in calculation
+                avg_undiscovered_score = sum(undiscovered_scores) / len(undiscovered_scores)
+                score += avg_undiscovered_score * 0.6  # Heavy weight for undiscovered talent
+                logger.debug(f"Channel has undiscovered score: {avg_undiscovered_score:.2f}")
+            
+            # Updated thresholds for undiscovered talent (lower view counts preferred)
+            if avg_views <= 5000:
+                score += 0.5  # Very low views - likely undiscovered
+            elif 5000 < avg_views <= 15000:
+                score += 0.4  # Low views - emerging potential
+            elif 15000 < avg_views <= 50000:
+                score += 0.2  # Medium views - some potential
+            elif avg_views > 50000:
+                score += 0.1  # Higher views - might be established
             
             # Video consistency
             if video_count >= 3:
@@ -646,6 +665,131 @@ class ApifyYouTubeAgent:
         
         return filtered_videos
     
+    def _filter_for_undiscovered_artists(self, videos: List[Dict[str, Any]], max_view_count: int = 50000) -> List[Dict[str, Any]]:
+        """
+        Filter videos to find undiscovered artists based on view count and other criteria
+        
+        Args:
+            videos: List of video data dictionaries
+            max_view_count: Maximum view count for considering a video as "undiscovered"
+            
+        Returns:
+            Filtered list of videos from undiscovered artists
+        """
+        undiscovered_videos = []
+        
+        for video in videos:
+            try:
+                view_count = video.get('view_count', 0)
+                title = video.get('title', '').lower()
+                channel_title = video.get('channel_title', '').lower()
+                
+                # Primary filter: View count under threshold
+                if view_count >= max_view_count:
+                    continue
+                
+                # Must have "official" in title for quality control
+                if 'official' not in title:
+                    continue
+                
+                # Filter out major labels and established channels
+                established_indicators = [
+                    'vevo', 'records', 'entertainment', 'music group', 
+                    'universal', 'sony', 'warner', 'atlantic', 'capitol',
+                    'rca', 'def jam', 'interscope', 'republic', 'columbia',
+                    'emi', 'bmg', 'island', 'virgin', 'roadrunner'
+                ]
+                
+                # Skip if channel name suggests major label
+                if any(indicator in channel_title for indicator in established_indicators):
+                    continue
+                
+                # Look for independent/new artist indicators
+                independent_indicators = [
+                    'independent', 'indie', 'unsigned', 'new artist', 
+                    'debut', 'first', 'emerging', 'upcoming', 'self-released'
+                ]
+                
+                # Prefer videos with independent indicators
+                has_independent_indicators = any(indicator in title or indicator in channel_title 
+                                               for indicator in independent_indicators)
+                
+                # Calculate undiscovered artist score
+                undiscovered_score = self._calculate_undiscovered_score(video, has_independent_indicators)
+                video['undiscovered_score'] = undiscovered_score
+                
+                # Only include if meets minimum undiscovered criteria
+                if undiscovered_score >= 0.3:
+                    undiscovered_videos.append(video)
+                    logger.debug(f"✅ Undiscovered artist found: {video.get('title')} ({view_count:,} views, score: {undiscovered_score:.2f})")
+                
+            except Exception as e:
+                logger.warning(f"Error filtering video for undiscovered artists: {e}")
+                continue
+        
+        # Sort by undiscovered score (highest first)
+        undiscovered_videos.sort(key=lambda x: x.get('undiscovered_score', 0), reverse=True)
+        
+        return undiscovered_videos
+    
+    def _calculate_undiscovered_score(self, video: Dict[str, Any], has_independent_indicators: bool) -> float:
+        """
+        Calculate a score for how likely this video is from an undiscovered artist
+        
+        Args:
+            video: Video data dictionary
+            has_independent_indicators: Whether the video has independent artist indicators
+            
+        Returns:
+            Score between 0 and 1 (higher = more likely undiscovered)
+        """
+        score = 0.0
+        
+        try:
+            view_count = video.get('view_count', 0)
+            title = video.get('title', '').lower()
+            channel_title = video.get('channel_title', '').lower()
+            
+            # Base score from view count (lower views = higher score)
+            if view_count < 1000:
+                score += 0.4  # Very few views
+            elif view_count < 5000:
+                score += 0.3
+            elif view_count < 15000:
+                score += 0.2
+            elif view_count < 30000:
+                score += 0.1
+            
+            # Bonus for independent indicators
+            if has_independent_indicators:
+                score += 0.3
+            
+            # Quality indicators (must be music video)
+            music_quality_terms = ['official music video', 'official video', 'music video']
+            if any(term in title for term in music_quality_terms):
+                score += 0.2
+            
+            # Recent upload bonus (if we can detect it's very recent)
+            published_at = video.get('published_at', '')
+            if 'hour' in published_at or 'minute' in published_at:
+                score += 0.1  # Very recent upload
+            
+            # Small channel bonus (likely new/undiscovered)
+            # We can estimate channel size from video performance
+            if view_count < 2000:
+                score += 0.1  # Likely small channel
+            
+            # Penalty for suspicious/spam indicators
+            spam_indicators = ['click', 'viral', 'trending', 'reaction', 'cover', 'remix']
+            if any(term in title for term in spam_indicators):
+                score -= 0.2
+            
+        except Exception as e:
+            logger.warning(f"Error calculating undiscovered score: {e}")
+            return 0.0
+        
+        return min(max(score, 0.0), 1.0)  # Clamp between 0 and 1
+    
     def get_cost_estimate(self, expected_videos: int) -> float:
         """
         Calculate estimated cost for scraping
@@ -711,6 +855,81 @@ class ApifyYouTubeAgent:
         logger.info(f"🎯 Batch discovery completed: {len(final_videos)} unique videos")
         
         return final_videos
+    
+    async def discover_undiscovered_artists(self, max_results: int = 100) -> List[Dict[str, Any]]:
+        """
+        Discover undiscovered artists by searching for 'official music video' 
+        with filters for recent uploads (24 hours) and low view counts (<50k)
+        
+        Args:
+            max_results: Maximum number of videos to analyze
+            
+        Returns:
+            List of filtered video data for undiscovered artists
+        """
+        if not self.apify_api_token:
+            logger.error("❌ Cannot discover undiscovered artists - APIFY_API_TOKEN not configured")
+            return []
+        
+        try:
+            # Search terms optimized for discovering new talent
+            discovery_keywords = [
+                "official music video",
+                "new music video", 
+                "debut music video",
+                "independent artist music video",
+                "unsigned artist music video"
+            ]
+            
+            # Generate search URLs for undiscovered talent discovery
+            start_urls = []
+            for keyword in discovery_keywords:
+                search_url = f"https://www.youtube.com/results?search_query={keyword.replace(' ', '+')}"
+                start_urls.append(search_url)
+            
+            # Configure for recent uploads and new talent discovery
+            actor_input = {
+                "startUrls": start_urls,
+                "keywords": discovery_keywords,
+                "maxItems": max_results * 2,  # Get more to filter down
+                "uploadDate": "today",  # Last 24 hours only
+                "duration": "all",
+                "features": "all",
+                "sort": "date",  # Sort by newest first for recent uploads
+                "gl": "us",
+                "hl": "en",
+                "maxRequestRetries": self.max_retries,
+                "requestTimeoutSecs": self.http_timeout
+            }
+            
+            logger.info(f"🔍 Discovering undiscovered artists with recent uploads (<24h, <50k views)")
+            
+            # Start the actor run
+            run_response = await self._start_actor_run(actor_input)
+            if not run_response:
+                logger.error("❌ Failed to start actor run for undiscovered artists discovery")
+                return []
+            
+            run_id = run_response['data']['id']
+            logger.info(f"✅ Started undiscovered artists discovery run: {run_id}")
+            
+            # Wait for completion and get results
+            results = await self._wait_for_completion_and_get_results(run_id, max_wait_time=self.actor_timeout)
+            
+            if results:
+                # Process and filter results for undiscovered artists
+                processed_results = self._process_video_results(results)
+                filtered_results = self._filter_for_undiscovered_artists(processed_results, max_view_count=50000)
+                
+                logger.info(f"✅ Found {len(filtered_results)} undiscovered artists from {len(processed_results)} total videos")
+                return filtered_results[:max_results]  # Return up to max_results
+            else:
+                logger.warning("⚠️ No results returned from undiscovered artists search")
+                return []
+                
+        except Exception as e:
+            logger.error(f"❌ Error discovering undiscovered artists: {str(e)}")
+            return []
     
     async def search_by_handles(self, handles: List[str], max_results: int = 50) -> List[Dict[str, Any]]:
         """
