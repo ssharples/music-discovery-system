@@ -184,7 +184,7 @@ class ApifyYouTubeAgent:
                 "maxItems": max_results,
                 "uploadDate": upload_date,
                 "duration": duration,
-                "features": "all",  # Include features parameter
+                "features": "any",  # Include features parameter
                 "sort": "r" if sort_by == "relevance" else "d" if sort_by == "date" else "r",
                 "gl": "us",  # Geographic location
                 "hl": "en"   # Language
@@ -255,9 +255,9 @@ class ApifyYouTubeAgent:
             actor_input = {
                 "startUrls": channel_urls,
                 "maxItems": max_videos_per_channel * len(channel_urls),
-                "uploadDate": "all",
-                "duration": "all", 
-                "features": "all",
+                "uploadDate": "any",
+                "duration": "any", 
+                "features": "any",
                 "sort": "r",
                 "gl": "us",
                 "hl": "en"
@@ -301,9 +301,9 @@ class ApifyYouTubeAgent:
             actor_input = {
                 "getTrending": True,
                 "maxItems": max_results,
-                "uploadDate": "all",
-                "duration": "all",
-                "features": "all", 
+                "uploadDate": "any",
+                "duration": "any",
+                "features": "any", 
                 "sort": "r",
                 "gl": "us",
                 "hl": "en"
@@ -478,11 +478,19 @@ class ApifyYouTubeAgent:
         }
         
         try:
+            # Debug: Log the exact payload being sent
+            logger.info(f"🔍 DEBUG: Sending payload to Apify: {json.dumps(actor_input, indent=2)}")
+            
             # Increase timeout for starting actor run
             async with httpx.AsyncClient(timeout=self.http_timeout) as client:
                 response = await client.post(url, headers=headers, json=actor_input)
                 response.raise_for_status()
                 return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"❌ HTTP {e.response.status_code} error starting Apify actor run")
+            logger.error(f"📄 Response content: {e.response.text}")
+            logger.error(f"📤 Request payload was: {json.dumps(actor_input, indent=2)}")
+            return None
         except httpx.TimeoutException as e:
             logger.error(f"Timeout starting Apify actor run: {str(e)}")
             return None
@@ -870,7 +878,7 @@ class ApifyYouTubeAgent:
                 keywords=discovery_keywords,
                 max_results=max_results * 2,  # Get more to filter down
                 upload_date="week",  # Recent uploads (week is more reliable than "today")
-                duration="all",
+                duration="any",
                 sort_by="date"  # Sort by newest first
             )
             
@@ -912,8 +920,8 @@ class ApifyYouTubeAgent:
                 "youtubeHandles": handles,
                 "maxItems": max_results,
                 "uploadDate": "month",
-                "duration": "all",
-                "features": "all",
+                "duration": "any",
+                "features": "any",
                 "sort": "r",
                 "gl": "us",
                 "hl": "en"
