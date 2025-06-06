@@ -20,6 +20,7 @@ from app.agents.youtube_agent import YouTubeDiscoveryAgent
 from app.agents.enhanced_enrichment_agent_simple import get_simple_enhanced_enrichment_agent
 from app.agents.lyrics_agent import get_lyrics_agent
 from app.agents.storage_agent import StorageAgent
+from app.agents.ai_detection_agent import get_ai_detection_agent
 from app.api.websocket import (
     notify_discovery_started, notify_discovery_progress, 
     notify_discovery_completed, notify_artist_discovered
@@ -60,6 +61,7 @@ class DiscoveryOrchestrator:
         self.youtube_agent = YouTubeDiscoveryAgent()
         self._enrichment_agent = None
         self._lyrics_agent = None
+        self._ai_detection_agent = None
         self.storage_agent = StorageAgent()
         self._orchestrator_agent = None
         self._agent_creation_attempted = False
@@ -99,6 +101,18 @@ class DiscoveryOrchestrator:
                 logger.error(f"❌ Failed to initialize lyrics agent: {e}")
                 self._lyrics_agent = None
         return self._lyrics_agent
+    
+    @property
+    def ai_detection_agent(self):
+        """Lazy initialization of AI detection agent"""
+        if self._ai_detection_agent is None:
+            try:
+                self._ai_detection_agent = get_ai_detection_agent()
+                logger.info("✅ AI detection agent initialized successfully")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize AI detection agent: {e}")
+                self._ai_detection_agent = None
+        return self._ai_detection_agent
         
     async def start_discovery_session(
         self,
@@ -465,6 +479,32 @@ class DiscoveryOrchestrator:
             enriched_profile = await self._enrich_artist_with_retry(
                 deps, base_profile, max_retries=3
             )
+            
+            # Phase 2.5: AI-Generated Content Detection
+            if self.ai_detection_agent:
+                try:
+                    logger.info(f"🤖 Checking {artist_name} for AI-generated content")
+                    ai_detection_result = await self.ai_detection_agent.analyze_artist_for_ai_content(
+                        enriched_profile, channel_data.get('recent_videos', []), deps
+                    )
+                    
+                    if ai_detection_result.is_ai_generated:
+                        logger.warning(f"🚫 FILTERED OUT: {artist_name} - {ai_detection_result.recommendation}")
+                        logger.info(f"Detection reasons: {ai_detection_result.detection_reasons}")
+                        return None  # Filter out AI-generated content
+                    else:
+                        logger.info(f"✅ HUMAN ARTIST: {artist_name} - {ai_detection_result.recommendation}")
+                        # Store AI detection metadata
+                        enriched_profile.metadata.update({
+                            "ai_detection": {
+                                "is_ai_generated": False,
+                                "confidence": ai_detection_result.confidence_score,
+                                "checked_at": datetime.now().isoformat()
+                            }
+                        })
+                except Exception as e:
+                    logger.warning(f"⚠️ AI detection failed for {artist_name}: {e}")
+                    # Continue processing if AI detection fails
             
             # Phase 3: Lyrics analysis (if agents available)
             videos_with_captions = []

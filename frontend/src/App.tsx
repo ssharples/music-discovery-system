@@ -66,6 +66,9 @@ function App() {
   const handleWebSocketMessage = (message: any) => {
     const { type, session_id, details, progress, summary } = message;
     
+    // Enhanced detailed logging to match backend
+    console.log('🔥 WebSocket Message:', message);
+    
     switch (type) {
       case 'connection':
         addLog('🔗 WebSocket connected - Real-time updates enabled');
@@ -74,6 +77,8 @@ function App() {
       case 'discovery_started':
         addLog(`🚀 Discovery session started: ${session_id}`);
         addLog(`🔍 Search query: "${details?.search_query || 'unknown'}" (max ${details?.max_results || 0} results)`);
+        addLog(`📋 Request details: query='${details?.search_query}', max_results=${details?.max_results}`);
+        addLog(`🎯 Starting discovery pipeline...`);
         setCurrentSessionId(session_id);
         fetchSessions();
         break;
@@ -88,62 +93,123 @@ function App() {
           setDiscoveryStatus(`${progress.message} (${Math.round(progress.progress)}%)`);
         }
         
-        // Handle specific progress phases
+        // Enhanced detailed logging for each phase
         switch (progress?.phase) {
           case 'youtube_discovery':
-            addLog(`🔍 Searching YouTube...`);
+            addLog(`🔍 Phase 1: YouTube Discovery with quality filtering`);
+            addLog(`🔍 About to call YouTube discovery with query: ${progress?.query || 'unknown'}`);
             break;
           case 'youtube_discovery_complete':
-            addLog(`✅ Found ${progress.artists_found || 0} potential artists`);
+            addLog(`✅ YouTube discovery completed successfully`);
+            addLog(`🎯 Discovered ${progress.artists_found || 0} potential artists after quality filtering`);
+            if (progress.sample_channels) {
+              addLog(`📝 Sample channels: ${progress.sample_channels.slice(0, 3).join(', ')}`);
+            }
             break;
-          case 'artist_processing':
-            addLog(`🎤 Starting artist enrichment pipeline...`);
+          case 'artist_processing_started':
+            addLog(`🎤 Phase 2: Process each artist with deduplication and retry logic`);
+            addLog(`🚀 Starting to process ${progress.total_artists || 0} discovered channels`);
             break;
           case 'processing_artist':
             if (progress.current_artist) {
-              addLog(`🔍 Processing: ${progress.current_artist}`);
+              addLog(`🎭 Processing artist ${progress.current_index || '?'}/${progress.total_artists || '?'}: ${progress.current_artist}`);
             }
+            break;
+          case 'enrichment_attempt':
+            addLog(`🔄 Enrichment attempt ${progress.attempt || 1} for ${progress.artist_name || 'unknown'}`);
+            break;
+          case 'enrichment_completed':
+            addLog(`✅ Enhanced enrichment successful for ${progress.artist_name || 'unknown'} (score: ${progress.score?.toFixed(2) || 'N/A'})`);
+            break;
+          case 'firecrawl_started':
+            addLog(`🔥 Firecrawl scraping: ${progress.url || 'unknown'}`);
+            break;
+          case 'firecrawl_completed':
+            addLog(`✅ Firecrawl successfully scraped ${progress.url || 'unknown'}`);
+            break;
+          case 'ai_detection_started':
+            addLog(`🤖 Checking ${progress.artist_name || 'unknown'} for AI-generated content`);
+            break;
+          case 'ai_detection_filtered':
+            addLog(`🚫 FILTERED OUT: ${progress.artist_name || 'unknown'} - AI-generated content detected`);
+            if (progress.reasons) {
+              addLog(`📋 Detection reasons: ${progress.reasons.join(', ')}`);
+            }
+            break;
+          case 'ai_detection_passed':
+            addLog(`✅ HUMAN ARTIST: ${progress.artist_name || 'unknown'} - Human artist confirmed`);
+            break;
+          case 'lyrics_analysis_started':
+            addLog(`🎵 Getting videos with captions for channel: ${progress.channel_id || 'unknown'}`);
+            break;
+          case 'lyrics_analysis_completed':
+            addLog(`✅ Retrieved ${progress.videos_count || 0} videos with captions`);
             break;
           case 'artist_processed':
             if (progress.enriched_count) {
-              addLog(`✅ Successfully enriched ${progress.enriched_count} artists so far`);
+              addLog(`🎨 Artist processing completed: ${progress.artist_name || 'unknown'} (score: ${progress.score?.toFixed(2) || 'N/A'})`);
+              addLog(`📊 Total enriched so far: ${progress.enriched_count} artists`);
             }
             break;
+          case 'artist_quality_threshold':
+            addLog(`⚠️ Artist below quality threshold: ${progress.artist_name || 'unknown'}`);
+            break;
           case 'artist_skipped':
-            addLog(`⚠️ Skipped artist (insufficient data)`);
+            addLog(`⏭️ Skipping duplicate artist: ${progress.artist_name || 'unknown'}`);
             break;
           case 'artist_error':
-            addLog(`❌ Error: ${progress.error || 'Unknown error'}`);
+            addLog(`❌ Artist processing failed for ${progress.artist_name || 'unknown'}: ${progress.error || 'Unknown error'}`);
             break;
           case 'pipeline_error':
-            addLog(`💥 Pipeline failed: ${progress.error || 'Unknown error'}`);
+            addLog(`💥 CRITICAL PIPELINE ERROR: ${progress.error || 'Unknown error'}`);
+            addLog(`📍 Error type: ${progress.error_type || 'Unknown'}`);
             setIsDiscovering(false);
             break;
+          default:
+            if (progress?.message) {
+              addLog(`📋 ${progress.phase || 'unknown'}: ${progress.message}`);
+            }
         }
         break;
         
       case 'discovery_completed':
-        const { artists_discovered, videos_processed, total_candidates, success_rate } = summary || {};
-        addLog(`🎉 Discovery completed!`);
-        addLog(`📊 Results: ${artists_discovered || 0} artists enriched from ${total_candidates || 0} candidates`);
-        addLog(`📹 ${videos_processed || 0} videos processed | Success rate: ${success_rate || '0%'}`);
+        const { artists_discovered, videos_processed, total_candidates, success_rate, filtered_ai_count, firecrawl_enriched } = summary || {};
+        addLog(`🎉 Discovery pipeline completed successfully!`);
+        addLog(`📊 Final Results Summary:`);
+        addLog(`  • ${artists_discovered || 0} artists successfully enriched`);
+        addLog(`  • ${total_candidates || 0} total candidates analyzed`);
+        addLog(`  • ${filtered_ai_count || 0} AI-generated artists filtered out`);
+        addLog(`  • ${firecrawl_enriched || 0} artists enhanced with Firecrawl data`);
+        addLog(`  • ${videos_processed || 0} videos processed for lyrics analysis`);
+        addLog(`  • Success rate: ${success_rate || '0%'}`);
         
         setIsDiscovering(false);
         setDiscoveryStatus(`Discovery completed: ${artists_discovered || 0} artists found`);
-        fetchSessions();
-        fetchArtists();
-        fetchAnalytics();
+        
+        // Enhanced refresh after completion
+        setTimeout(() => {
+          fetchSessions();
+          fetchArtists();
+          fetchAnalytics();
+        }, 1000);
         break;
         
       case 'artist_discovered':
         if (details?.name) {
           addLog(`🎤 New artist discovered: ${details.name} (score: ${details.enrichment_score?.toFixed(2) || 'N/A'})`);
+          if (details.ai_detection) {
+            addLog(`  🤖 AI detection: ${details.ai_detection.is_ai_generated ? 'AI-generated' : 'Human artist'} (confidence: ${details.ai_detection.confidence?.toFixed(2) || 'N/A'})`);
+          }
+          if (details.firecrawl_data) {
+            addLog(`  🔥 Firecrawl enhanced: ${details.firecrawl_data.sources_count || 0} sources scraped`);
+          }
           // Trigger a refresh of artists list
           fetchArtists();
         }
         break;
         
       default:
+        console.log('📨 Unhandled WebSocket message:', message);
         addLog(`📨 ${type}: ${JSON.stringify(message).substring(0, 100)}...`);
     }
   };

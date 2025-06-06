@@ -14,6 +14,13 @@ from app.core.config import settings
 from app.core.dependencies import PipelineDependencies
 from app.models.artist import ArtistProfile
 
+# Import Firecrawl if available
+try:
+    import firecrawl
+    FIRECRAWL_AVAILABLE = True
+except ImportError:
+    FIRECRAWL_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 class EnhancementData(BaseModel):
@@ -88,6 +95,12 @@ class SimpleEnhancedEnrichmentAgent:
                 "video_count": artist_profile.metadata.get("video_count", 0)
             }
             
+            # Enhanced data gathering with Firecrawl
+            firecrawl_data = await self._gather_firecrawl_data(artist_profile, deps)
+            if firecrawl_data:
+                basic_info.update(firecrawl_data)
+                logger.info(f"🔥 Enhanced data with Firecrawl for {artist_profile.name}")
+            
             # Use AI agent if available
             if self.agent:
                 analysis_prompt = f"""
@@ -120,7 +133,7 @@ class SimpleEnhancedEnrichmentAgent:
                             "artist_name": artist_profile.name,
                             "basic_info": basic_info,
                             "ai_insights": ai_insights,
-                            "enrichment_score": 75.0,  # Default good score
+                            "enrichment_score": 0.75,  # Default good score (0-1 scale)
                             "data_sources": ["youtube", "ai_analysis"],
                             "processed_at": datetime.now().isoformat()
                         }
@@ -180,7 +193,127 @@ class SimpleEnhancedEnrichmentAgent:
         if social_links:
             score += 10
         
-        return min(score, 100.0)
+        return min(score / 100.0, 1.0)  # Convert to 0-1 scale
+    
+    async def _gather_firecrawl_data(
+        self, 
+        artist_profile: ArtistProfile, 
+        deps: PipelineDependencies
+    ) -> Dict[str, Any]:
+        """Gather additional data using Firecrawl for web scraping"""
+        
+        if not FIRECRAWL_AVAILABLE or not settings.is_firecrawl_configured():
+            logger.debug("Firecrawl not available or configured")
+            return {}
+        
+        try:
+            from firecrawl import FirecrawlApp
+            
+            # Initialize Firecrawl client
+            app = FirecrawlApp(api_key=settings.FIRECRAWL_API_KEY)
+            
+            enrichment_data = {
+                "firecrawl_sources": [],
+                "web_mentions": 0,
+                "social_presence": {},
+                "contact_info": {}
+            }
+            
+            # Try to find artist website or social media
+            search_urls = []
+            
+            # Look for website in metadata
+            if artist_profile.metadata.get("website"):
+                search_urls.append(artist_profile.metadata["website"])
+            
+            # Generate potential social media URLs
+            artist_name_clean = artist_profile.name.lower().replace(" ", "")
+            potential_urls = [
+                f"https://www.instagram.com/{artist_name_clean}/",
+                f"https://twitter.com/{artist_name_clean}",
+                f"https://www.facebook.com/{artist_name_clean}",
+            ]
+            
+            # Crawl available URLs
+            for url in search_urls + potential_urls[:2]:  # Limit to avoid quota issues
+                try:
+                    logger.info(f"🔥 Firecrawl scraping: {url}")
+                    
+                    scrape_result = app.scrape_url(
+                        url,
+                        params={
+                            'formats': ['markdown', 'html'],
+                            'timeout': 10000,
+                            'waitFor': 2000
+                        }
+                    )
+                    
+                    if scrape_result and scrape_result.get('success'):
+                        content = scrape_result.get('markdown', '')
+                        
+                        # Extract useful information
+                        if content:
+                            enrichment_data["firecrawl_sources"].append(url)
+                            
+                            # Look for contact information
+                            contact_info = self._extract_contact_info(content)
+                            if contact_info:
+                                enrichment_data["contact_info"].update(contact_info)
+                            
+                            # Count social media mentions
+                            social_mentions = content.lower().count("instagram") + \
+                                            content.lower().count("twitter") + \
+                                            content.lower().count("facebook")
+                            
+                            enrichment_data["web_mentions"] += len(content.split())
+                            enrichment_data["social_presence"][url] = {
+                                "content_length": len(content),
+                                "social_mentions": social_mentions
+                            }
+                            
+                            logger.info(f"✅ Firecrawl successfully scraped {url}")
+                        
+                except Exception as e:
+                    logger.warning(f"Firecrawl failed for {url}: {e}")
+                    continue
+            
+            # Return enrichment data if we found anything useful
+            if enrichment_data["firecrawl_sources"]:
+                logger.info(f"🔥 Firecrawl enriched {artist_profile.name} with {len(enrichment_data['firecrawl_sources'])} sources")
+                return enrichment_data
+            
+        except Exception as e:
+            logger.error(f"❌ Firecrawl enrichment failed: {e}")
+        
+        return {}
+    
+    def _extract_contact_info(self, content: str) -> Dict[str, str]:
+        """Extract contact information from scraped content"""
+        import re
+        
+        contact_info = {}
+        
+        # Email patterns
+        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        emails = re.findall(email_pattern, content)
+        if emails:
+            contact_info["email"] = emails[0]  # Take first email found
+        
+        # Phone patterns (basic)
+        phone_pattern = r'[\+]?[1-9]?[0-9]{7,15}'
+        phones = re.findall(phone_pattern, content)
+        if phones:
+            contact_info["phone"] = phones[0]
+        
+        # Social media handles
+        if "@" in content:
+            # Look for social handles
+            social_pattern = r'@([A-Za-z0-9_]{1,15})'
+            handles = re.findall(social_pattern, content)
+            if handles:
+                contact_info["social_handle"] = f"@{handles[0]}"
+        
+        return contact_info
 
 # Factory function for easy import
 def get_simple_enhanced_enrichment_agent() -> SimpleEnhancedEnrichmentAgent:
