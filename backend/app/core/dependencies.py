@@ -73,7 +73,7 @@ def get_http_client() -> httpx.AsyncClient:
     global _http_client
     if _http_client is None:
         _http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(30.0),
+            timeout=httpx.Timeout(120.0),  # Increased to 2 minutes for AI API calls
             limits=httpx.Limits(max_connections=100, max_keepalive_connections=20)
         )
         logger.info("Initialized HTTP client")
