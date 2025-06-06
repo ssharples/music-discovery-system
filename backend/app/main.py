@@ -179,4 +179,8 @@ async def detailed_health_check():
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     logger.error(f"Global exception: {exc}")
-    return HTTPException(status_code=500, detail="Internal server error") 
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"}
+    ) 
