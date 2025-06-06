@@ -33,7 +33,7 @@ class ApifyYouTubeAgent:
     
     def __init__(self):
         self.apify_api_token = settings.APIFY_API_TOKEN or os.getenv('APIFY_API_TOKEN')
-        self.actor_id = "1p1aa7gcSydPkAE0d"  # Official apidojo/youtube-scraper actor ID
+        self.actor_id = "apidojo~youtube-scraper"  # apidojo/youtube-scraper actor
         self.base_url = "https://api.apify.com/v2"
         
         # Use configured timeouts
