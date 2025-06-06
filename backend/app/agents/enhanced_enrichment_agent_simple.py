@@ -16,7 +16,7 @@ from app.models.artist import ArtistProfile
 
 # Import Firecrawl if available
 try:
-    import firecrawl
+    from firecrawl import FirecrawlApp
     FIRECRAWL_AVAILABLE = True
 except ImportError:
     FIRECRAWL_AVAILABLE = False
@@ -232,13 +232,16 @@ class SimpleEnhancedEnrichmentAgent:
     ) -> Dict[str, Any]:
         """Gather additional data using Firecrawl for web scraping"""
         
-        if not FIRECRAWL_AVAILABLE or not settings.is_firecrawl_configured():
-            logger.info(f"Firecrawl not available - FIRECRAWL_AVAILABLE: {FIRECRAWL_AVAILABLE}, configured: {settings.is_firecrawl_configured()}")
+        if not FIRECRAWL_AVAILABLE:
+            logger.info("Firecrawl package not installed - install with: pip install firecrawl-py")
+            return {}
+            
+        if not settings.is_firecrawl_configured():
+            logger.info("Firecrawl API key not configured - set FIRECRAWL_API_KEY environment variable")
+            logger.info("Get API key from: https://firecrawl.dev")
             return {}
         
         try:
-            from firecrawl import FirecrawlApp
-            
             # Initialize Firecrawl client
             app = FirecrawlApp(api_key=settings.FIRECRAWL_API_KEY)
             
@@ -264,22 +267,20 @@ class SimpleEnhancedEnrichmentAgent:
                 f"https://www.facebook.com/{artist_name_clean}",
             ]
             
-            # Crawl available URLs
-            for url in search_urls + potential_urls[:2]:  # Limit to avoid quota issues
+            # Crawl available URLs (limit to 2 to avoid quota issues)
+            for url in search_urls + potential_urls[:2]:
                 try:
                     logger.info(f"🔥 Firecrawl scraping: {url}")
                     
+                    # Use the updated API format from documentation
                     scrape_result = app.scrape_url(
                         url,
-                        params={
-                            'formats': ['markdown', 'html'],
-                            'timeout': 10000,
-                            'waitFor': 2000
-                        }
+                        formats=['markdown', 'html']
                     )
                     
                     if scrape_result and scrape_result.get('success'):
-                        content = scrape_result.get('markdown', '')
+                        data = scrape_result.get('data', {})
+                        content = data.get('markdown', '')
                         
                         # Extract useful information
                         if content:
@@ -298,7 +299,8 @@ class SimpleEnhancedEnrichmentAgent:
                             enrichment_data["web_mentions"] += len(content.split())
                             enrichment_data["social_presence"][url] = {
                                 "content_length": len(content),
-                                "social_mentions": social_mentions
+                                "social_mentions": social_mentions,
+                                "metadata": data.get('metadata', {})
                             }
                             
                             logger.info(f"✅ Firecrawl successfully scraped {url}")
