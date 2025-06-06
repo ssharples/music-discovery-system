@@ -60,6 +60,7 @@ class EnrichedArtistData(BaseModel):
     lyric_analyses: List[LyricAnalysis] = Field(default_factory=list)
     enrichment_score: float = Field(ge=0, le=1)
     discovery_session_id: Optional[UUID4] = None
+    discovery_metadata: Dict[str, Any] = Field(default_factory=dict)
 
 class DiscoveryRequest(BaseModel):
     """Discovery request model"""

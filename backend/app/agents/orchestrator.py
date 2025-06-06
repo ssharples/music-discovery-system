@@ -435,7 +435,9 @@ class DiscoveryOrchestrator:
                 return existing_artist
             
             # Phase 1: Basic profile creation
+            profile_id = uuid4()
             base_profile = ArtistProfile(
+                id=profile_id,
                 name=artist_name,
                 youtube_channel_id=channel_id,
                 youtube_channel_name=artist_name,
@@ -463,7 +465,7 @@ class DiscoveryOrchestrator:
                     
                     if videos_with_captions:
                         lyric_analyses = await self.lyrics_agent.analyze_artist_lyrics(
-                            deps, str(enriched_profile.id), videos_with_captions
+                            deps, str(enriched_profile.id or profile_id), videos_with_captions
                         )
                 except Exception as e:
                     logger.warning(f"⚠️ Lyrics analysis failed for {artist_name}: {e}")
@@ -478,7 +480,7 @@ class DiscoveryOrchestrator:
             )
             
             # Phase 5: Store in database
-            await self.storage_agent.store_artist_profile(deps, enriched_artist)
+            await self.storage_agent.store_artist_profile(deps, enriched_artist.profile)
             
             logger.info(f"🎨 Artist processing completed: {artist_name} (score: {enriched_profile.enrichment_score:.2f})")
             return enriched_artist
