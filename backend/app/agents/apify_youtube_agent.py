@@ -297,10 +297,9 @@ class ApifyYouTubeAgent:
             return []
         
         try:
-            # Use trending search URL as shown in official examples
-            trending_urls = ["https://www.youtube.com/feed/trending"]
+            # Use the official getTrending parameter
             actor_input = {
-                "startUrls": trending_urls,
+                "getTrending": True,
                 "maxItems": max_results,
                 "uploadDate": "all",
                 "duration": "all",
