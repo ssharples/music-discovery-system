@@ -19,6 +19,15 @@ youtube-transcript-api==0.6.1
 beautifulsoup4==4.12.2
 lxml==4.9.3
 
+# Enhanced Web Scraping
+firecrawl-py==1.1.0
+scrapy==2.11.0
+selenium==4.15.0
+
+# Additional AI Tools
+openai==1.5.0
+anthropic==0.8.0
+
 # Background Tasks
 celery==5.3.4
 

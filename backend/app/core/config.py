@@ -13,6 +13,15 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY: str = Field("", env="DEEPSEEK_API_KEY")
     FIRECRAWL_API_KEY: str = Field("", env="FIRECRAWL_API_KEY")
     
+    # Enhanced AI Provider Keys
+    OPENAI_API_KEY: str = Field("", env="OPENAI_API_KEY")
+    ANTHROPIC_API_KEY: str = Field("", env="ANTHROPIC_API_KEY")
+    
+    # Firecrawl Configuration
+    FIRECRAWL_API_URL: str = Field("https://api.firecrawl.dev", env="FIRECRAWL_API_URL")
+    FIRECRAWL_TIMEOUT: int = Field(30000, env="FIRECRAWL_TIMEOUT")
+    FIRECRAWL_MAX_RETRIES: int = Field(3, env="FIRECRAWL_MAX_RETRIES")
+    
     # Supabase (optional for basic deployment)
     SUPABASE_URL: str = Field("", env="SUPABASE_URL")
     SUPABASE_KEY: str = Field("", env="SUPABASE_KEY")
@@ -77,5 +86,28 @@ class Settings(BaseSettings):
     def is_deepseek_configured(self) -> bool:
         """Check if DeepSeek API is properly configured"""
         return bool(self.DEEPSEEK_API_KEY)
+    
+    def is_firecrawl_configured(self) -> bool:
+        """Check if Firecrawl API is properly configured"""
+        return bool(self.FIRECRAWL_API_KEY)
+    
+    def is_openai_configured(self) -> bool:
+        """Check if OpenAI API is properly configured"""
+        return bool(self.OPENAI_API_KEY)
+    
+    def is_anthropic_configured(self) -> bool:
+        """Check if Anthropic API is properly configured"""
+        return bool(self.ANTHROPIC_API_KEY)
+    
+    def get_available_ai_providers(self) -> List[str]:
+        """Get list of configured AI providers"""
+        providers = []
+        if self.is_deepseek_configured():
+            providers.append("deepseek")
+        if self.is_openai_configured():
+            providers.append("openai")
+        if self.is_anthropic_configured():
+            providers.append("anthropic")
+        return providers
 
 settings = Settings() 
