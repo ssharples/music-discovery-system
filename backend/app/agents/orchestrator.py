@@ -8,6 +8,7 @@ import logging
 import asyncio
 from datetime import datetime, timedelta, timezone
 from fastapi import BackgroundTasks
+import time
 
 from app.core.config import settings
 from app.core.dependencies import PipelineDependencies
@@ -68,6 +69,11 @@ class DiscoveryOrchestrator:
         # Use global quota_manager from app.core.quota_manager
         self.quota_manager = quota_manager
         self._processed_artists = set()  # Deduplication cache
+        
+        # Session control
+        self._active_sessions = {}  # session_id -> control flags
+        self._session_states = {}  # session_id -> current state info
+        
         logger.info("✅ Orchestrator initialized with lazy agent loading")
     
     @property
@@ -379,6 +385,11 @@ class DiscoveryOrchestrator:
             logger.info(f"🎬 Entering try block for session {session_id}")
             logger.info(f"Starting discovery pipeline for session {session_id}")
             
+            # Check if session should continue
+            if not self._check_session_control(str(session_id)):
+                logger.info(f"🛑 Discovery pipeline stopped before YouTube discovery for session {session_id}")
+                return
+            
             # Phase 1: YouTube Discovery with quality filtering
             logger.info(f"About to call YouTube discovery with query: {request.search_query}")
             try:
@@ -386,6 +397,12 @@ class DiscoveryOrchestrator:
                     deps, request.search_query, request.max_results, session_id
                 )
                 logger.info(f"✅ YouTube discovery completed successfully")
+                
+                # Check if session should continue after YouTube discovery
+                if not self._check_session_control(str(session_id)):
+                    logger.info(f"🛑 Discovery pipeline stopped after YouTube discovery for session {session_id}")
+                    return
+                    
             except Exception as youtube_error:
                 logger.error(f"❌ YouTube discovery failed: {youtube_error}")
                 # Continue with empty list to test rest of pipeline
@@ -405,6 +422,11 @@ class DiscoveryOrchestrator:
             
             for i, channel_data in enumerate(discovered_channels, 1):
                 try:
+                    # Check if session should continue before each artist
+                    if not self._check_session_control(str(session_id)):
+                        logger.info(f"🛑 Discovery pipeline stopped at artist {i}/{total_artists} for session {session_id}")
+                        break
+                    
                     artist_name = channel_data.get('extracted_artist_name') or channel_data.get('channel_title', 'Unknown Artist')
                     channel_title = channel_data.get('channel_title', 'Unknown Artist')
                     channel_id = channel_data.get('channel_id')
@@ -812,3 +834,200 @@ class DiscoveryOrchestrator:
         logger.info(f"📋 Processing discovery task: {task.get('type', 'unknown')}")
         # This would handle individual background tasks
         pass
+
+    def _get_session_control(self, session_id: str) -> Dict[str, Any]:
+        """Get or create session control flags"""
+        if session_id not in self._active_sessions:
+            self._active_sessions[session_id] = {
+                'should_stop': False,
+                'should_pause': False,
+                'is_paused': False,
+                'created_at': time.time()
+            }
+        return self._active_sessions[session_id]
+    
+    def _check_session_control(self, session_id: str) -> bool:
+        """Check if session should continue (not stopped or paused)"""
+        if not session_id:
+            return True  # No session control for direct API calls
+        
+        control = self._get_session_control(session_id)
+        
+        # Check for stop signal
+        if control['should_stop']:
+            logger.info(f"🛑 Session {session_id} received stop signal")
+            return False
+        
+        # Check for pause signal
+        if control['should_pause'] and not control['is_paused']:
+            control['is_paused'] = True
+            logger.info(f"⏸️ Session {session_id} paused")
+        
+        # If paused, wait for resume
+        while control['should_pause'] and not control['should_stop']:
+            time.sleep(1)  # Check every second
+            
+        if control['is_paused'] and not control['should_pause']:
+            control['is_paused'] = False
+            logger.info(f"▶️ Session {session_id} resumed")
+        
+        return not control['should_stop']
+    
+    async def pause_session(self, session_id: str, deps: PipelineDependencies) -> Dict[str, Any]:
+        """Pause a running discovery session"""
+        try:
+            control = self._get_session_control(session_id)
+            
+            if control['should_stop']:
+                return {
+                    "status": "error",
+                    "message": "Cannot pause a stopped session",
+                    "session_id": session_id
+                }
+            
+            control['should_pause'] = True
+            logger.info(f"⏸️ Pause requested for session {session_id}")
+            
+            # Update session status in database
+            await self.storage_agent.update_discovery_session(
+                deps,
+                session_id,
+                {
+                    "status": "paused",
+                    "paused_at": datetime.now(timezone.utc).isoformat()
+                }
+            )
+            
+            return {
+                "status": "success",
+                "message": "Session pause requested",
+                "session_id": session_id
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error pausing session {session_id}: {e}")
+            return {
+                "status": "error",
+                "message": f"Failed to pause session: {str(e)}",
+                "session_id": session_id
+            }
+    
+    async def resume_session(self, session_id: str, deps: PipelineDependencies) -> Dict[str, Any]:
+        """Resume a paused discovery session"""
+        try:
+            control = self._get_session_control(session_id)
+            
+            if control['should_stop']:
+                return {
+                    "status": "error",
+                    "message": "Cannot resume a stopped session",
+                    "session_id": session_id
+                }
+            
+            if not control['should_pause']:
+                return {
+                    "status": "error",
+                    "message": "Session is not paused",
+                    "session_id": session_id
+                }
+            
+            control['should_pause'] = False
+            logger.info(f"▶️ Resume requested for session {session_id}")
+            
+            # Update session status in database
+            await self.storage_agent.update_discovery_session(
+                deps,
+                session_id,
+                {
+                    "status": "running",
+                    "resumed_at": datetime.now(timezone.utc).isoformat()
+                }
+            )
+            
+            return {
+                "status": "success",
+                "message": "Session resumed",
+                "session_id": session_id
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error resuming session {session_id}: {e}")
+            return {
+                "status": "error",
+                "message": f"Failed to resume session: {str(e)}",
+                "session_id": session_id
+            }
+    
+    async def stop_session(self, session_id: str, deps: PipelineDependencies) -> Dict[str, Any]:
+        """Stop a running discovery session"""
+        try:
+            control = self._get_session_control(session_id)
+            control['should_stop'] = True
+            control['should_pause'] = False  # Clear pause if set
+            
+            logger.info(f"🛑 Stop requested for session {session_id}")
+            
+            # Update session status in database
+            await self.storage_agent.update_discovery_session(
+                deps,
+                session_id,
+                {
+                    "status": "stopped",
+                    "stopped_at": datetime.now(timezone.utc).isoformat(),
+                    "completed_at": datetime.now(timezone.utc).isoformat()
+                }
+            )
+            
+            # Clean up session from active sessions
+            if session_id in self._active_sessions:
+                del self._active_sessions[session_id]
+            
+            return {
+                "status": "success",
+                "message": "Session stopped",
+                "session_id": session_id
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error stopping session {session_id}: {e}")
+            return {
+                "status": "error",
+                "message": f"Failed to stop session: {str(e)}",
+                "session_id": session_id
+            }
+    
+    async def get_session_status(self, session_id: str) -> Dict[str, Any]:
+        """Get current status of a session"""
+        try:
+            if session_id in self._active_sessions:
+                control = self._active_sessions[session_id]
+                state = self._session_states.get(session_id, {})
+                
+                status = "running"
+                if control['should_stop']:
+                    status = "stopped"
+                elif control['is_paused']:
+                    status = "paused"
+                elif control['should_pause']:
+                    status = "pausing"
+                
+                return {
+                    "session_id": session_id,
+                    "status": status,
+                    "control_flags": control,
+                    "state": state
+                }
+            else:
+                return {
+                    "session_id": session_id,
+                    "status": "not_found",
+                    "message": "Session not active or completed"
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Error getting session status {session_id}: {e}")
+            return {
+                "session_id": session_id,
+                "status": "error",
+                "message": str(e)
+            }

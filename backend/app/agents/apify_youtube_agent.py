@@ -702,19 +702,9 @@ class ApifyYouTubeAgent:
                 # Skip if channel name suggests major label
                 if any(indicator in channel_title for indicator in established_indicators):
                     continue
-                
-                # Look for independent/new artist indicators
-                independent_indicators = [
-                    'independent', 'indie', 'unsigned', 'new artist', 
-                    'debut', 'first', 'emerging', 'upcoming', 'self-released'
-                ]
-                
-                # Prefer videos with independent indicators
-                has_independent_indicators = any(indicator in title or indicator in channel_title 
-                                               for indicator in independent_indicators)
-                
+                                
                 # Calculate undiscovered artist score
-                undiscovered_score = self._calculate_undiscovered_score(video, has_independent_indicators)
+                undiscovered_score = self._calculate_undiscovered_score(video)
                 video['undiscovered_score'] = undiscovered_score
                 
                 # Only include if meets minimum undiscovered criteria
@@ -872,13 +862,8 @@ class ApifyYouTubeAgent:
         
         try:
             # Search terms optimized for discovering new talent
-            discovery_keywords = [
-                "official music video",
-                "new music video", 
-                "debut music video",
-                "independent artist music video",
-                "unsigned artist music video"
-            ]
+            discovery_keywords =   "official music video"
+            
             
             logger.info(f"🔍 Discovering undiscovered artists with recent uploads (<50k views)")
             

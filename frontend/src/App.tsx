@@ -11,6 +11,7 @@ function App() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
+  const [sessionStatus, setSessionStatus] = useState<string>('unknown');
 
   useEffect(() => {
     fetchHealthStatus();
@@ -80,6 +81,7 @@ function App() {
         addLog(`📋 Request details: query='${details?.search_query}', max_results=${details?.max_results}`);
         addLog(`🎯 Starting discovery pipeline...`);
         setCurrentSessionId(session_id);
+        setSessionStatus('running');
         fetchSessions();
         break;
         
@@ -184,6 +186,7 @@ function App() {
         addLog(`  • Success rate: ${success_rate || '0%'}`);
         
         setIsDiscovering(false);
+        setSessionStatus('completed');
         setDiscoveryStatus(`Discovery completed: ${artists_discovered || 0} artists found`);
         
         // Enhanced refresh after completion
@@ -205,6 +208,25 @@ function App() {
           }
           // Trigger a refresh of artists list
           fetchArtists();
+        }
+        break;
+        
+      case 'session_paused':
+        addLog(`⏸️ Session paused: ${session_id}`);
+        setSessionStatus('paused');
+        break;
+        
+      case 'session_resumed':
+        addLog(`▶️ Session resumed: ${session_id}`);
+        setSessionStatus('running');
+        break;
+        
+      case 'session_stopped':
+        addLog(`🛑 Session stopped: ${session_id}`);
+        setSessionStatus('stopped');
+        setIsDiscovering(false);
+        if (session_id === currentSessionId) {
+          setCurrentSessionId(null);
         }
         break;
         
@@ -285,6 +307,7 @@ function App() {
       console.log('✅ Discovery response received:', response);
       setDiscoveryStatus(`Discovery started: ${response.message}`);
       setCurrentSessionId(response.session_id);
+      setSessionStatus('running');
       addLog(`🚀 Discovery session started: ${response.session_id}`);
       
       // Only start progress checking if we have a session ID
@@ -330,6 +353,94 @@ function App() {
       }
     }
   };
+
+  const pauseDiscovery = async () => {
+    if (!currentSessionId) {
+      addLog('⚠️ No active session to pause');
+      return;
+    }
+
+    try {
+      addLog('⏸️ Requesting session pause...');
+      const response = await apiClient.pauseSession(currentSessionId);
+      
+      if (response.status === 'success') {
+        addLog(`⏸️ ${response.message}`);
+        setSessionStatus('paused');
+      } else {
+        addLog(`❌ Failed to pause: ${response.message}`);
+      }
+    } catch (error) {
+      addLog(`❌ Error pausing session: ${error}`);
+    }
+  };
+
+  const resumeDiscovery = async () => {
+    if (!currentSessionId) {
+      addLog('⚠️ No active session to resume');
+      return;
+    }
+
+    try {
+      addLog('▶️ Requesting session resume...');
+      const response = await apiClient.resumeSession(currentSessionId);
+      
+      if (response.status === 'success') {
+        addLog(`▶️ ${response.message}`);
+        setSessionStatus('running');
+      } else {
+        addLog(`❌ Failed to resume: ${response.message}`);
+      }
+    } catch (error) {
+      addLog(`❌ Error resuming session: ${error}`);
+    }
+  };
+
+  const stopDiscovery = async () => {
+    if (!currentSessionId) {
+      addLog('⚠️ No active session to stop');
+      return;
+    }
+
+    try {
+      addLog('🛑 Requesting session stop...');
+      const response = await apiClient.stopSession(currentSessionId);
+      
+      if (response.status === 'success') {
+        addLog(`🛑 ${response.message}`);
+        setSessionStatus('stopped');
+        setIsDiscovering(false);
+        setCurrentSessionId(null);
+      } else {
+        addLog(`❌ Failed to stop: ${response.message}`);
+      }
+    } catch (error) {
+      addLog(`❌ Error stopping session: ${error}`);
+    }
+  };
+
+  const checkSessionStatus = async () => {
+    if (!currentSessionId) return;
+
+    try {
+      const status = await apiClient.getSessionStatus(currentSessionId);
+      setSessionStatus(status.status);
+      
+      if (status.status === 'stopped' || status.status === 'completed') {
+        setIsDiscovering(false);
+      }
+    } catch (error) {
+      console.error('Error checking session status:', error);
+    }
+  };
+
+  // Check session status periodically when there's an active session
+  useEffect(() => {
+    if (currentSessionId && isDiscovering) {
+      const statusInterval = setInterval(checkSessionStatus, 5000); // Check every 5 seconds
+      return () => clearInterval(statusInterval);
+    }
+  }, [currentSessionId, isDiscovering]);
 
   return (
     <div className="min-h-screen bg-gray-100 p-8">
@@ -386,9 +497,17 @@ function App() {
                 <div>
                   <div className="font-mono text-xs">{currentSessionId}</div>
                   <div className={`mt-2 inline-block px-2 py-1 rounded text-xs ${
-                    isDiscovering ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
+                    sessionStatus === 'running' ? 'bg-green-100 text-green-800' :
+                    sessionStatus === 'paused' ? 'bg-yellow-100 text-yellow-800' :
+                    sessionStatus === 'stopped' ? 'bg-red-100 text-red-800' :
+                    sessionStatus === 'completed' ? 'bg-blue-100 text-blue-800' :
+                    'bg-gray-100 text-gray-800'
                   }`}>
-                    {isDiscovering ? 'Running' : 'Completed'}
+                    {sessionStatus === 'running' ? 'Running' :
+                     sessionStatus === 'paused' ? 'Paused' :
+                     sessionStatus === 'stopped' ? 'Stopped' :
+                     sessionStatus === 'completed' ? 'Completed' :
+                     'Unknown'}
                   </div>
                 </div>
               ) : (
@@ -416,10 +535,42 @@ function App() {
               {isDiscovering ? 'Running Discovery...' : 'Run Discovery'}
             </button>
             
+            {/* Session Control Buttons */}
+            {currentSessionId && isDiscovering && (
+              <>
+                {sessionStatus === 'running' && (
+                  <button
+                    onClick={pauseDiscovery}
+                    className="px-6 py-3 rounded-lg font-medium text-lg bg-yellow-500 text-white hover:bg-yellow-600"
+                  >
+                    ⏸️ Pause
+                  </button>
+                )}
+                
+                {sessionStatus === 'paused' && (
+                  <button
+                    onClick={resumeDiscovery}
+                    className="px-6 py-3 rounded-lg font-medium text-lg bg-blue-500 text-white hover:bg-blue-600"
+                  >
+                    ▶️ Resume
+                  </button>
+                )}
+                
+                <button
+                  onClick={stopDiscovery}
+                  className="px-6 py-3 rounded-lg font-medium text-lg bg-red-500 text-white hover:bg-red-600"
+                >
+                  🛑 Stop
+                </button>
+              </>
+            )}
+            
             {isDiscovering && (
               <div className="flex items-center text-gray-600">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-600 mr-2"></div>
-                Processing for up to 5 minutes...
+                <div className={`rounded-full h-4 w-4 border-b-2 mr-2 ${
+                  sessionStatus === 'paused' ? 'bg-yellow-500' : 'animate-spin border-green-600'
+                }`}></div>
+                {sessionStatus === 'paused' ? 'Discovery Paused' : 'Processing for up to 5 minutes...'}
               </div>
             )}
           </div>

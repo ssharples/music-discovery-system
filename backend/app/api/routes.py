@@ -214,6 +214,65 @@ async def get_session_details(
         logger.error(f"Error fetching session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/session/{session_id}/pause")
+async def pause_discovery_session(
+    session_id: UUID,
+    deps: PipelineDependencies = Depends(get_pipeline_deps)
+):
+    """Pause a running discovery session"""
+    try:
+        from app.agents.orchestrator import DiscoveryOrchestrator
+        orchestrator = DiscoveryOrchestrator()
+        result = await orchestrator.pause_session(str(session_id), deps)
+        return result
+    except Exception as e:
+        logger.error(f"Error pausing session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/session/{session_id}/resume")
+async def resume_discovery_session(
+    session_id: UUID,
+    deps: PipelineDependencies = Depends(get_pipeline_deps)
+):
+    """Resume a paused discovery session"""
+    try:
+        from app.agents.orchestrator import DiscoveryOrchestrator
+        orchestrator = DiscoveryOrchestrator()
+        result = await orchestrator.resume_session(str(session_id), deps)
+        return result
+    except Exception as e:
+        logger.error(f"Error resuming session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/session/{session_id}/stop")
+async def stop_discovery_session(
+    session_id: UUID,
+    deps: PipelineDependencies = Depends(get_pipeline_deps)
+):
+    """Stop a running discovery session"""
+    try:
+        from app.agents.orchestrator import DiscoveryOrchestrator
+        orchestrator = DiscoveryOrchestrator()
+        result = await orchestrator.stop_session(str(session_id), deps)
+        return result
+    except Exception as e:
+        logger.error(f"Error stopping session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/session/{session_id}/status")
+async def get_session_status(
+    session_id: UUID
+):
+    """Get current status of a discovery session"""
+    try:
+        from app.agents.orchestrator import DiscoveryOrchestrator
+        orchestrator = DiscoveryOrchestrator()
+        result = await orchestrator.get_session_status(str(session_id))
+        return result
+    except Exception as e:
+        logger.error(f"Error getting session status {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/debug/config")
 async def debug_config(
     deps: PipelineDependencies = Depends(get_pipeline_deps)

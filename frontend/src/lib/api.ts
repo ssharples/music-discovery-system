@@ -167,6 +167,34 @@ class ApiClient {
   }> {
     return this.request('/api/analytics');
   }
+
+  async pauseSession(sessionId: string): Promise<{ status: string; message: string; session_id: string }> {
+    return this.request(`/api/session/${sessionId}/pause`, {
+      method: 'POST',
+    });
+  }
+
+  async resumeSession(sessionId: string): Promise<{ status: string; message: string; session_id: string }> {
+    return this.request(`/api/session/${sessionId}/resume`, {
+      method: 'POST',
+    });
+  }
+
+  async stopSession(sessionId: string): Promise<{ status: string; message: string; session_id: string }> {
+    return this.request(`/api/session/${sessionId}/stop`, {
+      method: 'POST',
+    });
+  }
+
+  async getSessionStatus(sessionId: string): Promise<{ 
+    session_id: string; 
+    status: string; 
+    control_flags?: any; 
+    state?: any; 
+    message?: string;
+  }> {
+    return this.request(`/api/session/${sessionId}/status`);
+  }
 }
 
 // Export singleton instance
