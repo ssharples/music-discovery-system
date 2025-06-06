@@ -96,11 +96,23 @@ class SimpleEnhancedEnrichmentAgent:
             }
             
             # Enhanced data gathering with Firecrawl
+            logger.info(f"🔥 Attempting Firecrawl enrichment for {artist_profile.name}...")
             firecrawl_data = await self._gather_firecrawl_data(artist_profile, deps)
             if firecrawl_data:
                 basic_info.update(firecrawl_data)
                 logger.info(f"🔥 Enhanced data with Firecrawl for {artist_profile.name}")
+            else:
+                logger.info(f"⚠️ No Firecrawl data gathered for {artist_profile.name}")
             
+            # Spotify data gathering
+            logger.info(f"🎵 Attempting Spotify enrichment for {artist_profile.name}...")
+            spotify_data = await self._gather_spotify_data(artist_profile, deps)
+            if spotify_data:
+                basic_info.update(spotify_data)
+                logger.info(f"🎵 Enhanced data with Spotify for {artist_profile.name}")
+            else:
+                logger.info(f"⚠️ No Spotify data gathered for {artist_profile.name}")
+
             # Use AI agent if available
             if self.agent:
                 analysis_prompt = f"""
@@ -193,6 +205,24 @@ class SimpleEnhancedEnrichmentAgent:
         if social_links:
             score += 10
         
+        # Firecrawl enrichment bonus
+        if basic_info.get("firecrawl_sources"):
+            score += 15
+            logger.debug(f"Firecrawl bonus: +15 points")
+        
+        # Spotify enrichment bonus
+        spotify_data = basic_info.get("spotify_data")
+        if spotify_data:
+            score += 20
+            spotify_followers = spotify_data.get("spotify_followers", 0)
+            if spotify_followers > 1000:
+                score += 5
+            if spotify_followers > 10000:
+                score += 5
+            logger.debug(f"Spotify bonus: +20-30 points (followers: {spotify_followers})")
+        
+        logger.info(f"📊 Basic enrichment score calculated: {score}/100 -> {score/100:.2f}")
+        
         return min(score / 100.0, 1.0)  # Convert to 0-1 scale
     
     async def _gather_firecrawl_data(
@@ -203,7 +233,7 @@ class SimpleEnhancedEnrichmentAgent:
         """Gather additional data using Firecrawl for web scraping"""
         
         if not FIRECRAWL_AVAILABLE or not settings.is_firecrawl_configured():
-            logger.debug("Firecrawl not available or configured")
+            logger.info(f"Firecrawl not available - FIRECRAWL_AVAILABLE: {FIRECRAWL_AVAILABLE}, configured: {settings.is_firecrawl_configured()}")
             return {}
         
         try:
@@ -314,6 +344,77 @@ class SimpleEnhancedEnrichmentAgent:
                 contact_info["social_handle"] = f"@{handles[0]}"
         
         return contact_info
+
+    async def _gather_spotify_data(
+        self,
+        artist_profile: ArtistProfile,
+        deps: PipelineDependencies
+    ) -> Dict[str, Any]:
+        """Gather Spotify data for the artist"""
+        
+        if not settings.is_spotify_configured():
+            logger.info(f"Spotify not configured - CLIENT_ID: {bool(settings.SPOTIFY_CLIENT_ID)}, CLIENT_SECRET: {bool(settings.SPOTIFY_CLIENT_SECRET)}")
+            return {}
+        
+        try:
+            logger.info(f"🎵 Fetching Spotify data for {artist_profile.name}")
+            
+            # Get Spotify access token
+            auth_url = "https://accounts.spotify.com/api/token"
+            auth_data = {
+                "grant_type": "client_credentials",
+                "client_id": settings.SPOTIFY_CLIENT_ID,
+                "client_secret": settings.SPOTIFY_CLIENT_SECRET
+            }
+            
+            auth_response = await deps.http_client.post(auth_url, data=auth_data)
+            auth_response.raise_for_status()
+            access_token = auth_response.json()["access_token"]
+            
+            # Search for artist
+            search_url = "https://api.spotify.com/v1/search"
+            headers = {"Authorization": f"Bearer {access_token}"}
+            params = {
+                "q": artist_profile.name,
+                "type": "artist",
+                "limit": 5
+            }
+            
+            search_response = await deps.http_client.get(
+                search_url,
+                headers=headers,
+                params=params
+            )
+            search_response.raise_for_status()
+            
+            artists = search_response.json()["artists"]["items"]
+            if artists:
+                # Find the best match
+                best_match = artists[0]
+                for artist in artists:
+                    if artist["name"].lower() == artist_profile.name.lower():
+                        best_match = artist
+                        break
+                
+                spotify_data = {
+                    "spotify_id": best_match["id"],
+                    "spotify_name": best_match["name"],
+                    "spotify_genres": best_match.get("genres", []),
+                    "spotify_popularity": best_match.get("popularity", 0),
+                    "spotify_followers": best_match["followers"]["total"],
+                    "spotify_external_urls": best_match.get("external_urls", {}),
+                    "spotify_images": best_match.get("images", [])
+                }
+                
+                logger.info(f"✅ Found Spotify data for {artist_profile.name}: {spotify_data['spotify_followers']} followers")
+                return {"spotify_data": spotify_data}
+            else:
+                logger.info(f"❌ No Spotify results found for {artist_profile.name}")
+                return {}
+                
+        except Exception as e:
+            logger.error(f"❌ Spotify API error for {artist_profile.name}: {e}")
+            return {}
 
 # Factory function for easy import
 def get_simple_enhanced_enrichment_agent() -> SimpleEnhancedEnrichmentAgent:
