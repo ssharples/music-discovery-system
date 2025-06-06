@@ -78,7 +78,7 @@ class ApifyYouTubeAgent:
                 videos = await self.search_music_content(
                     keywords=[query],
                     max_results=max_results,
-                    upload_date="t",  # Focus on very recent content
+                    upload_date="today",  # Focus on very recent content
                     sort_by="date"  # Sort by newest first
                 )
                 
@@ -147,14 +147,14 @@ class ApifyYouTubeAgent:
     async def search_music_content(self, 
                            keywords: List[str], 
                            max_results: int = 50,
-                           upload_date: str = "t",
+                           upload_date: str = "today",
                            duration: str = "any",
                            sort_by: str = "relevance") -> List[Dict[str, Any]]:
         """
         Search for music content using Apify YouTube scraper with improved error handling
         
         Args:
-            keywords: List of search terms (e.g., ["new music 2024", "indie rock"])
+            keywords: List of search terms (e.g., ["official music video"])
             max_results: Maximum number of videos to return
             upload_date: Filter by upload time (hour, today, week, month, year)
             duration: Video length filter (short, long, all)
@@ -255,7 +255,7 @@ class ApifyYouTubeAgent:
             actor_input = {
                 "startUrls": channel_urls,
                 "maxItems": max_videos_per_channel * len(channel_urls),
-                "uploadDate": "t",
+                "uploadDate": "today",
                 "duration": "any", 
                 "features": "any",
                 "sort": "r",
@@ -301,7 +301,7 @@ class ApifyYouTubeAgent:
             actor_input = {
                 "getTrending": True,
                 "maxItems": max_results,
-                "uploadDate": "t",
+                "uploadDate": "today",
                 "duration": "any",
                 "features": "any", 
                 "sort": "r",
@@ -822,7 +822,7 @@ class ApifyYouTubeAgent:
                 batch_videos = await self.search_music_content(
                     keywords=search_keywords,
                     max_results=batch_size,
-                    upload_date="t",
+                    upload_date="today",
                     sort_by="relevance"
                 )
                 
@@ -877,7 +877,7 @@ class ApifyYouTubeAgent:
             all_videos = await self.search_music_content(
                 keywords=discovery_keywords,
                 max_results=max_results * 2,  # Get more to filter down
-                upload_date="t",  # Recent uploads
+                upload_date="today",  # Recent uploads
                 duration="any",
                 sort_by="date"  # Sort by newest first
             )
@@ -919,7 +919,7 @@ class ApifyYouTubeAgent:
             actor_input = {
                 "youtubeHandles": handles,
                 "maxItems": max_results,
-                "uploadDate": "t",
+                "uploadDate": "today",
                 "duration": "any",
                 "features": "any",
                 "sort": "r",
