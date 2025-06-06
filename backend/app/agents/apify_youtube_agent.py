@@ -184,7 +184,7 @@ class ApifyYouTubeAgent:
                 "maxItems": max_results,
                 "uploadDate": upload_date,
                 "duration": duration,
-                "features": "any",  # Include features parameter
+                "features": "all",  # Include features parameter
                 "sort": "r" if sort_by == "relevance" else "d" if sort_by == "date" else "r",
                 "gl": "us",  # Geographic location
                 "hl": "en"   # Language
@@ -257,7 +257,7 @@ class ApifyYouTubeAgent:
                 "maxItems": max_videos_per_channel * len(channel_urls),
                 "uploadDate": "t",
                 "duration": "all", 
-                "features": "any",
+                "features": "all",
                 "sort": "r",
                 "gl": "us",
                 "hl": "en"
@@ -303,7 +303,7 @@ class ApifyYouTubeAgent:
                 "maxItems": max_results,
                 "uploadDate": "t",
                 "duration": "all",
-                "features": "any", 
+                "features": "all", 
                 "sort": "r",
                 "gl": "us",
                 "hl": "en"
@@ -921,7 +921,7 @@ class ApifyYouTubeAgent:
                 "maxItems": max_results,
                 "uploadDate": "t",
                 "duration": "all",
-                "features": "any",
+                "features": "all",
                 "sort": "r",
                 "gl": "us",
                 "hl": "en"
