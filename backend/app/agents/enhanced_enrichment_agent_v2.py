@@ -321,12 +321,12 @@ class EnhancedEnrichmentAgentV2:
             if self.firecrawl_app:
                 # Add delay to avoid rate limiting  
                 await asyncio.sleep(3)
-                search_results = await self._search_artist_web_presence(artist_profile.name)
+                search_results = self._search_artist_web_presence(artist_profile.name)
                 enrichment_result["firecrawl_operations"].append(f"web_search: {len(search_results)} queries")
                 
                 # Extract additional contact info from search results
                 if search_results:
-                    search_contact_info = await self._extract_contact_from_search_results(search_results)
+                    search_contact_info = self._extract_contact_from_web_presence(search_results)
                     
                     # Merge with existing contact info
                     if search_contact_info["emails"]:
@@ -684,6 +684,11 @@ class EnhancedEnrichmentAgentV2:
             )
             
             logger.info(f"🔥 FIRECRAWL DEBUG: Spotify raw response received")
+            logger.info(f"🔥 FIRECRAWL DEBUG: Response success: {response.success if response else 'None'}")
+            logger.info(f"🔥 FIRECRAWL DEBUG: Response has data attr: {hasattr(response, 'data') if response else 'None'}")
+            if response and hasattr(response, 'data'):
+                logger.info(f"🔥 FIRECRAWL DEBUG: Response data type: {type(response.data)}")
+                logger.info(f"🔥 FIRECRAWL DEBUG: Response data attributes: {dir(response.data) if response.data else 'None'}")
             
             # Check for response data in v2.8.0 format
             if not response or not response.success:
@@ -1212,7 +1217,7 @@ class EnhancedEnrichmentAgentV2:
         
         return min(score, 1.0)
 
-    async def _search_artist_web_presence(self, artist_name: str) -> Dict[str, Any]:
+    def _search_artist_web_presence(self, artist_name: str) -> Dict[str, Any]:
         """Search for artist's web presence using Firecrawl Search API"""
         try:
             if not self.firecrawl_app:
@@ -1286,6 +1291,61 @@ class EnhancedEnrichmentAgentV2:
         except Exception as e:
             logger.error(f"🔍 SEARCH API: Web presence search failed for {artist_name}: {e}")
             return {}
+
+    def _extract_contact_from_web_presence(self, web_presence: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract contact information from web presence results"""
+        contact_info = {
+            "emails": [],
+            "websites": [],
+            "social_media": {},
+            "booking_info": []
+        }
+        
+        if not web_presence:
+            return contact_info
+        
+        try:
+            # Extract from social links
+            for social_link in web_presence.get("social_links", []):
+                platform = social_link.get("platform")
+                url = social_link.get("url")
+                if platform and url:
+                    contact_info["social_media"][platform] = url
+            
+            # Extract from music platforms  
+            for music_platform in web_presence.get("music_platforms", []):
+                platform = music_platform.get("platform")
+                url = music_platform.get("url")
+                if platform and url:
+                    contact_info["social_media"][platform] = url
+            
+            # Add official website
+            if web_presence.get("official_website"):
+                contact_info["websites"].append({
+                    "type": "official", 
+                    "url": web_presence["official_website"]
+                })
+            
+            # Extract contact info from the discovered URLs if available
+            urls_to_check = []
+            if web_presence.get("official_website"):
+                urls_to_check.append(web_presence["official_website"])
+            
+            # Limit URL checking to avoid rate limits
+            if urls_to_check:
+                extracted_contact = self._extract_contact_information(urls_to_check[:2])
+                if extracted_contact:
+                    if extracted_contact.get("email"):
+                        contact_info["emails"].append(extracted_contact["email"])
+                    if extracted_contact.get("booking_email"):
+                        contact_info["emails"].append(extracted_contact["booking_email"])
+            
+            logger.info(f"🔍 SEARCH API: Extracted contact data - Emails: {len(contact_info['emails'])}, Social: {len(contact_info['social_media'])}")
+            return contact_info
+            
+        except Exception as e:
+            logger.error(f"🔍 SEARCH API: Failed to extract contact from web presence: {e}")
+            return contact_info
 
     async def _extract_contact_from_search_results(self, search_results: Dict[str, Any]) -> Dict[str, Any]:
         """
