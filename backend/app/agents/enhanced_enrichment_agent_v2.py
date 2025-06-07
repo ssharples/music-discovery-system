@@ -73,12 +73,31 @@ class EnhancedEnrichmentAgentV2:
         self._agent_creation_attempted = False
         self.firecrawl_app = None
         
+        # Enhanced debugging for Firecrawl initialization
+        logger.info(f"🔥 FIRECRAWL DEBUG: EnhancedEnrichmentAgentV2 initialization starting...")
+        logger.info(f"🔥 FIRECRAWL DEBUG: FIRECRAWL_AVAILABLE = {FIRECRAWL_AVAILABLE}")
+        logger.info(f"🔥 FIRECRAWL DEBUG: settings.FIRECRAWL_API_KEY exists = {bool(settings.FIRECRAWL_API_KEY)}")
+        logger.info(f"🔥 FIRECRAWL DEBUG: settings.FIRECRAWL_API_KEY length = {len(settings.FIRECRAWL_API_KEY) if settings.FIRECRAWL_API_KEY else 0}")
+        logger.info(f"🔥 FIRECRAWL DEBUG: settings.is_firecrawl_configured() = {settings.is_firecrawl_configured()}")
+        
         if FIRECRAWL_AVAILABLE and settings.is_firecrawl_configured():
             try:
+                logger.info(f"🔥 FIRECRAWL DEBUG: Attempting to initialize FirecrawlApp...")
                 self.firecrawl_app = FirecrawlApp(api_key=settings.FIRECRAWL_API_KEY)
                 logger.info("✅ Firecrawl initialized successfully")
+                logger.info(f"🔥 FIRECRAWL DEBUG: FirecrawlApp object created = {self.firecrawl_app is not None}")
             except Exception as e:
                 logger.error(f"❌ Failed to initialize Firecrawl: {e}")
+                logger.error(f"🔥 FIRECRAWL DEBUG: Exception type: {type(e).__name__}")
+                logger.error(f"🔥 FIRECRAWL DEBUG: Exception details: {str(e)}")
+        else:
+            logger.warning(f"🔥 FIRECRAWL DEBUG: Firecrawl initialization skipped")
+            logger.warning(f"🔥 FIRECRAWL DEBUG: - FIRECRAWL_AVAILABLE: {FIRECRAWL_AVAILABLE}")
+            logger.warning(f"🔥 FIRECRAWL DEBUG: - is_firecrawl_configured(): {settings.is_firecrawl_configured()}")
+            if not FIRECRAWL_AVAILABLE:
+                logger.error(f"🔥 FIRECRAWL DEBUG: Firecrawl library import failed! Please check installation.")
+            if not settings.is_firecrawl_configured():
+                logger.error(f"🔥 FIRECRAWL DEBUG: Firecrawl API key not configured! Please set FIRECRAWL_API_KEY environment variable.")
     
     @property
     def ai_agent(self) -> Optional[Agent]:
