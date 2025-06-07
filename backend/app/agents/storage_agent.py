@@ -170,20 +170,21 @@ class StorageAgent:
                 status=artist_data.get('status', 'discovered')
             )
             
-            # Create EnrichedArtistData
+            # Get enrichment score with fallback
+            enrichment_score = artist_data.get('enrichment_score', 0.0)
+            
+            # Create EnrichedArtistData with required enrichment_score
             enriched = EnrichedArtistData(
                 profile=profile,
                 videos=[],  # Would need to fetch separately
                 lyric_analyses=[],  # Would need to fetch separately
+                enrichment_score=enrichment_score,  # Provide enrichment_score in constructor
                 discovery_metadata={
                     'discovery_date': artist_data.get('discovery_date'),
                     'last_updated': artist_data.get('last_updated'),
                     'database_id': artist_data.get('id')
                 }
             )
-            
-            # Copy enrichment score to top level
-            enriched.enrichment_score = profile.enrichment_score
             
             return enriched
             

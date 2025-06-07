@@ -242,8 +242,8 @@ class EnhancedEnrichmentAgentV2:
     ) -> Optional[Dict[str, Any]]:
         """Get Spotify artist data with validation"""
         
-        if not deps.spotify_client:
-            logger.warning("⚠️ Spotify client not available")
+        if not settings.is_spotify_configured():
+            logger.warning("⚠️ Spotify not configured")
             return None
         
         try:
@@ -253,7 +253,26 @@ class EnhancedEnrichmentAgentV2:
             if artist_profile.spotify_id:
                 logger.info(f"🎵 Using pre-discovered Spotify ID: {artist_profile.spotify_id}")
                 try:
-                    spotify_data = await deps.spotify_client.get_artist(artist_profile.spotify_id)
+                    # Get access token
+                    auth_response = await deps.http_client.post(
+                        "https://accounts.spotify.com/api/token",
+                        data={
+                            "grant_type": "client_credentials",
+                            "client_id": deps.spotify_client_id,
+                            "client_secret": deps.spotify_client_secret
+                        }
+                    )
+                    auth_response.raise_for_status()
+                    access_token = auth_response.json()["access_token"]
+                    
+                    # Get artist data
+                    artist_response = await deps.http_client.get(
+                        f"https://api.spotify.com/v1/artists/{artist_profile.spotify_id}",
+                        headers={"Authorization": f"Bearer {access_token}"}
+                    )
+                    artist_response.raise_for_status()
+                    spotify_data = artist_response.json()
+                    
                     if spotify_data:
                         logger.info(f"✅ Retrieved Spotify data using pre-discovered ID for {artist_profile.name}")
                         return self._format_spotify_artist_data(spotify_data)
@@ -262,7 +281,32 @@ class EnhancedEnrichmentAgentV2:
             
             # Fallback: Search by artist name
             logger.info(f"🔍 Searching Spotify for artist: {artist_profile.name}")
-            search_results = await deps.spotify_client.search_artist(artist_profile.name)
+            
+            # Get access token
+            auth_response = await deps.http_client.post(
+                "https://accounts.spotify.com/api/token",
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": deps.spotify_client_id,
+                    "client_secret": deps.spotify_client_secret
+                }
+            )
+            auth_response.raise_for_status()
+            access_token = auth_response.json()["access_token"]
+            
+            # Search for artist
+            search_response = await deps.http_client.get(
+                "https://api.spotify.com/v1/search",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={
+                    "q": artist_profile.name,
+                    "type": "artist",
+                    "limit": 5
+                }
+            )
+            search_response.raise_for_status()
+            
+            search_results = search_response.json()
             
             if not search_results or not search_results.get('artists', {}).get('items'):
                 logger.info(f"❌ No Spotify artist found for: {artist_profile.name}")
