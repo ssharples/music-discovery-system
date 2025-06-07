@@ -175,6 +175,29 @@ async def detailed_health_check():
             "environment": settings.ENVIRONMENT
         }
 
+@app.get("/debug/firecrawl")
+async def debug_firecrawl():
+    """Debug endpoint to test Firecrawl initialization"""
+    try:
+        from app.agents.enhanced_enrichment_agent_v2 import get_enhanced_enrichment_agent_v2, FIRECRAWL_AVAILABLE
+        from app.core.config import settings
+        
+        # Force create a new agent to see initialization logs
+        agent = get_enhanced_enrichment_agent_v2()
+        
+        return {
+            "firecrawl_library_available": FIRECRAWL_AVAILABLE,
+            "firecrawl_api_key_configured": settings.is_firecrawl_configured(),
+            "firecrawl_api_key_length": len(settings.FIRECRAWL_API_KEY) if settings.FIRECRAWL_API_KEY else 0,
+            "firecrawl_app_initialized": agent.firecrawl_app is not None,
+            "agent_created": agent is not None
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "error_type": type(e).__name__
+        }
+
 # Add global exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
