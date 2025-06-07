@@ -684,6 +684,8 @@ class ApifyYouTubeAgent:
         """
         undiscovered_videos = []
         
+        logger.info(f"🔍 Filtering {len(videos)} videos for undiscovered artists (max views: {max_view_count:,})")
+        
         for video in videos:
             try:
                 view_count = video.get('view_count', 0)
@@ -692,11 +694,11 @@ class ApifyYouTubeAgent:
                 
                 # Primary filter: View count under threshold
                 if view_count >= max_view_count:
+                    logger.debug(f"❌ Filtered out (too many views): {title[:50]}... ({view_count:,} views)")
                     continue
                 
-                # Must have "official" in title for quality control
-                if 'official' not in title:
-                    continue
+                # Prefer "official" in title but don't require it (many new artists don't use "official")
+                has_official = 'official' in title
                 
                 # Filter out major labels and established channels
                 established_indicators = [
@@ -708,16 +710,22 @@ class ApifyYouTubeAgent:
                 
                 # Skip if channel name suggests major label
                 if any(indicator in channel_title for indicator in established_indicators):
+                    logger.debug(f"❌ Filtered out (major label): {title[:50]}... (channel: {channel_title})")
                     continue
                                 
+                # Detect independent indicators
+                independent_indicators = not any(indicator in channel_title for indicator in established_indicators)
+                
                 # Calculate undiscovered artist score
-                undiscovered_score = self._calculate_undiscovered_score(video)
+                undiscovered_score = self._calculate_undiscovered_score(video, independent_indicators)
                 video['undiscovered_score'] = undiscovered_score
                 
-                # Only include if meets minimum undiscovered criteria
-                if undiscovered_score >= 0.3:
+                # Lower threshold for undiscovered talent (more inclusive)
+                if undiscovered_score >= 0.2:
                     undiscovered_videos.append(video)
                     logger.debug(f"✅ Undiscovered artist found: {video.get('title')} ({view_count:,} views, score: {undiscovered_score:.2f})")
+                else:
+                    logger.debug(f"❌ Low score: {title[:50]}... ({view_count:,} views, score: {undiscovered_score:.2f})")
                 
             except Exception as e:
                 logger.warning(f"Error filtering video for undiscovered artists: {e}")
@@ -760,10 +768,14 @@ class ApifyYouTubeAgent:
             if has_independent_indicators:
                 score += 0.3
             
-            # Quality indicators (must be music video)
-            music_quality_terms = ['official music video', 'official video', 'music video']
+            # Quality indicators (music video terms)
+            music_quality_terms = ['official music video', 'official video', 'music video', 'official']
             if any(term in title for term in music_quality_terms):
                 score += 0.2
+            
+            # Bonus for having "official" in title (indicates serious artist)
+            if 'official' in title:
+                score += 0.1
             
             # Recent upload bonus (if we can detect it's very recent)
             published_at = video.get('published_at', '')
