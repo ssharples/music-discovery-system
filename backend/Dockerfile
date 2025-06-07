@@ -20,12 +20,11 @@ RUN apt-get update \
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
+    && echo "📦 Installing requirements..." \
     && pip install --no-cache-dir -r requirements.txt \
-    && python -c "import firecrawl; print('✅ Firecrawl installed successfully')" \
-    || (echo "❌ Firecrawl installation failed, installing separately..." \
-        && pip install --no-cache-dir firecrawl-py==1.10.0 --force-reinstall --no-deps \
-        && pip install --no-cache-dir firecrawl-py==1.10.0 \
-        && python -c "import firecrawl; print('✅ Firecrawl installed after retry')")
+    && echo "🔍 Verifying firecrawl installation..." \
+    && python -c "import firecrawl; print('✅ Firecrawl imported successfully'); print(f'Firecrawl version: {firecrawl.__version__ if hasattr(firecrawl, \"__version__\") else \"unknown\"}')" \
+    && echo "✅ All dependencies installed successfully"
 
 # Copy application code
 COPY ./app /app/app
