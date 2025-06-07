@@ -78,7 +78,7 @@ class ApifyYouTubeAgent:
                 videos = await self.search_music_content(
                     keywords=[query],
                     max_results=max_results,
-                    upload_date="t",  # Focus on very recent content
+                    upload_date="w",  # Focus on very recent content
                     sort_by="date"  # Sort by newest first
                 )
                 
@@ -149,7 +149,7 @@ class ApifyYouTubeAgent:
                            max_results: int = 50,
                            upload_date: str = "w",
                            duration: str = "all",
-                           sort_by: str = "relevance") -> List[Dict[str, Any]]:
+                           sort_by: str = "u") -> List[Dict[str, Any]]:
         """
         Search for music content using Apify YouTube scraper with improved error handling
         
