@@ -24,18 +24,42 @@ from app.models.artist import ArtistProfile, LyricAnalysis
 
 # Import Firecrawl if available
 try:
+    import sys
+    logger.info(f"🔥 FIRECRAWL DEBUG: Python path: {sys.path[:3]}...")
+    logger.info(f"🔥 FIRECRAWL DEBUG: Attempting primary firecrawl import...")
     from firecrawl import FirecrawlApp
     FIRECRAWL_AVAILABLE = True
     FIRECRAWL_IMPORT_ERROR = None
+    logger.info(f"🔥 FIRECRAWL DEBUG: Primary import successful!")
 except ImportError as e:
+    logger.info(f"🔥 FIRECRAWL DEBUG: Primary import failed: {str(e)}")
     try:
+        logger.info(f"🔥 FIRECRAWL DEBUG: Attempting secondary firecrawl import...")
         # Try alternative import path
         from firecrawl.firecrawl import FirecrawlApp
         FIRECRAWL_AVAILABLE = True
         FIRECRAWL_IMPORT_ERROR = None
+        logger.info(f"🔥 FIRECRAWL DEBUG: Secondary import successful!")
     except ImportError as e2:
+        logger.error(f"🔥 FIRECRAWL DEBUG: Both imports failed!")
+        logger.error(f"🔥 FIRECRAWL DEBUG: Primary error: {str(e)}")
+        logger.error(f"🔥 FIRECRAWL DEBUG: Secondary error: {str(e2)}")
         FIRECRAWL_AVAILABLE = False
         FIRECRAWL_IMPORT_ERROR = f"Primary: {str(e)}, Secondary: {str(e2)}"
+        
+        # Additional debugging
+        logger.info(f"🔥 FIRECRAWL DEBUG: Checking installed packages...")
+        try:
+            import pkg_resources
+            installed_packages = [d.project_name for d in pkg_resources.working_set]
+            firecrawl_packages = [pkg for pkg in installed_packages if 'firecrawl' in pkg.lower()]
+            logger.info(f"🔥 FIRECRAWL DEBUG: Found firecrawl packages: {firecrawl_packages}")
+        except Exception as pkg_e:
+            logger.info(f"🔥 FIRECRAWL DEBUG: Error checking packages: {pkg_e}")
+except Exception as e:
+    logger.error(f"🔥 FIRECRAWL DEBUG: Unexpected error during import: {str(e)}")
+    FIRECRAWL_AVAILABLE = False
+    FIRECRAWL_IMPORT_ERROR = f"Unexpected: {str(e)}"
 
 logger = logging.getLogger(__name__)
 
