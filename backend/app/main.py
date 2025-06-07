@@ -179,23 +179,37 @@ async def detailed_health_check():
 async def debug_firecrawl():
     """Debug endpoint to test Firecrawl initialization"""
     try:
-        from app.agents.enhanced_enrichment_agent_v2 import get_enhanced_enrichment_agent_v2, FIRECRAWL_AVAILABLE
+        # Import with error handling
+        try:
+            from firecrawl import FirecrawlApp
+            firecrawl_available = True
+        except ImportError as e:
+            firecrawl_available = False
+            import_error = str(e)
+        
         from app.core.config import settings
         
-        # Force create a new agent to see initialization logs
-        agent = get_enhanced_enrichment_agent_v2()
+        # Check API key
+        api_key_configured = bool(settings.FIRECRAWL_API_KEY)
+        api_key_length = len(settings.FIRECRAWL_API_KEY) if settings.FIRECRAWL_API_KEY else 0
         
-        return {
-            "firecrawl_library_available": FIRECRAWL_AVAILABLE,
-            "firecrawl_api_key_configured": settings.is_firecrawl_configured(),
-            "firecrawl_api_key_length": len(settings.FIRECRAWL_API_KEY) if settings.FIRECRAWL_API_KEY else 0,
-            "firecrawl_app_initialized": agent.firecrawl_app is not None,
-            "agent_created": agent is not None
+        result = {
+            "firecrawl_library_available": firecrawl_available,
+            "firecrawl_api_key_configured": api_key_configured,
+            "firecrawl_api_key_length": api_key_length,
+            "status": "debug_endpoint_working"
         }
+        
+        if not firecrawl_available:
+            result["import_error"] = import_error
+            
+        return result
+        
     except Exception as e:
         return {
             "error": str(e),
-            "error_type": type(e).__name__
+            "error_type": type(e).__name__,
+            "status": "debug_endpoint_error"
         }
 
 # Add global exception handler
