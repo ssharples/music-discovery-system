@@ -752,14 +752,16 @@ class ApifyYouTubeAgent:
             try:
                 extracted_artist = video.get('extracted_artist_name')
                 channel_title = video.get('channel_title', '')
+                description = video.get('description', '')
                 
                 if extracted_artist:
                     logger.info(f"🔍 Enriching {extracted_artist} with social media data...")
                     
-                    # Discover social media URLs
+                    # Discover social media URLs from description and artist name
                     social_media = await self.discover_social_media_urls(
                         artist_name=extracted_artist,
-                        channel_title=channel_title
+                        channel_title=channel_title,
+                        description=description
                     )
                     
                     # Add social media data to video
@@ -970,13 +972,14 @@ class ApifyYouTubeAgent:
             logger.error(f"❌ Error discovering undiscovered artists: {str(e)}")
             return []
     
-    async def discover_social_media_urls(self, artist_name: str, channel_title: str = None) -> Dict[str, str]:
+    async def discover_social_media_urls(self, artist_name: str, channel_title: str = None, description: str = "") -> Dict[str, str]:
         """
-        Discover Instagram and TikTok URLs for an artist to validate and enrich data
+        Discover Instagram and TikTok URLs for an artist by searching video descriptions and generating likely URLs
         
         Args:
             artist_name: Name of the artist to search for
             channel_title: Optional YouTube channel title for additional context
+            description: Video description to search for social media URLs
             
         Returns:
             Dict with discovered social media URLs: {"instagram": "", "tiktok": "", "validation_score": 0.0}
@@ -988,48 +991,45 @@ class ApifyYouTubeAgent:
         }
         
         try:
-            # Clean artist name for searching
-            search_name = self._clean_artist_name_for_search(artist_name)
-            if not search_name:
-                return social_urls
+            logger.info(f"🔍 Searching social media for artist: {artist_name}")
             
-            logger.info(f"🔍 Searching social media for artist: {search_name}")
+            # First priority: Search description for actual social media URLs
+            instagram_url, tiktok_url = self._extract_social_urls_from_description(description)
             
-            # Search patterns for Instagram and TikTok
-            instagram_patterns = [
-                f"@{search_name.replace(' ', '')}",
-                f"@{search_name.replace(' ', '_')}",
-                f"@{search_name.replace(' ', '.')}",
-                search_name
-            ]
-            
-            tiktok_patterns = [
-                f"@{search_name.replace(' ', '')}",
-                f"@{search_name.replace(' ', '_')}",
-                f"@{search_name.replace(' ', '.')}",
-                search_name
-            ]
-            
-            # Try to find Instagram URL
-            instagram_url = await self._search_instagram_profile(instagram_patterns)
             if instagram_url:
                 social_urls["instagram"] = instagram_url
-                social_urls["validation_score"] += 0.4
-                logger.debug(f"✅ Found Instagram: {instagram_url}")
+                social_urls["validation_score"] += 0.6  # Higher score for found URLs
+                logger.debug(f"✅ Found Instagram in description: {instagram_url}")
             
-            # Try to find TikTok URL  
-            tiktok_url = await self._search_tiktok_profile(tiktok_patterns)
             if tiktok_url:
                 social_urls["tiktok"] = tiktok_url
-                social_urls["validation_score"] += 0.4
-                logger.debug(f"✅ Found TikTok: {tiktok_url}")
+                social_urls["validation_score"] += 0.6  # Higher score for found URLs
+                logger.debug(f"✅ Found TikTok in description: {tiktok_url}")
+            
+            # If not found in description, try generating likely URLs
+            if not instagram_url or not tiktok_url:
+                search_name = self._clean_artist_name_for_search(artist_name)
+                if search_name:
+                    if not instagram_url:
+                        generated_instagram = await self._generate_likely_instagram_url(search_name)
+                        if generated_instagram:
+                            social_urls["instagram"] = generated_instagram
+                            social_urls["validation_score"] += 0.3  # Lower score for generated URLs
+                            logger.debug(f"🔗 Generated likely Instagram: {generated_instagram}")
+                    
+                    if not tiktok_url:
+                        generated_tiktok = await self._generate_likely_tiktok_url(search_name)
+                        if generated_tiktok:
+                            social_urls["tiktok"] = generated_tiktok
+                            social_urls["validation_score"] += 0.3  # Lower score for generated URLs
+                            logger.debug(f"🔗 Generated likely TikTok: {generated_tiktok}")
             
             # Additional validation if channel title is provided
-            if channel_title and (instagram_url or tiktok_url):
-                if self._validate_social_profiles_match_artist(search_name, channel_title, social_urls):
-                    social_urls["validation_score"] += 0.2
+            if channel_title and (social_urls["instagram"] or social_urls["tiktok"]):
+                if self._validate_social_profiles_match_artist(artist_name, channel_title, social_urls):
+                    social_urls["validation_score"] += 0.1
             
-            logger.info(f"🎯 Social media discovery for {search_name}: Instagram: {'✅' if instagram_url else '❌'}, TikTok: {'✅' if tiktok_url else '❌'}, Score: {social_urls['validation_score']:.1f}")
+            logger.info(f"🎯 Social media discovery for {artist_name}: Instagram: {'✅' if social_urls['instagram'] else '❌'}, TikTok: {'✅' if social_urls['tiktok'] else '❌'}, Score: {social_urls['validation_score']:.1f}")
             
         except Exception as e:
             logger.warning(f"⚠️ Error discovering social media for {artist_name}: {str(e)}")
@@ -1059,76 +1059,128 @@ class ApifyYouTubeAgent:
         
         return ' '.join(filtered_words)
     
-    async def _search_instagram_profile(self, search_patterns: List[str]) -> str:
+    def _extract_social_urls_from_description(self, description: str) -> tuple[str, str]:
         """
-        Search for Instagram profile using various patterns
-        Uses simple pattern-based search (can be enhanced with Apify Instagram scraper)
+        Extract Instagram and TikTok URLs from video description
+        
+        Args:
+            description: Video description text
+            
+        Returns:
+            Tuple of (instagram_url, tiktok_url) - empty strings if not found
+        """
+        import re
+        
+        instagram_url = ""
+        tiktok_url = ""
+        
+        if not description:
+            return instagram_url, tiktok_url
+        
+        try:
+            # Instagram URL patterns
+            instagram_patterns = [
+                r'https?://(?:www\.)?instagram\.com/([a-zA-Z0-9_.]+)/?',
+                r'instagram\.com/([a-zA-Z0-9_.]+)/?',
+                r'@([a-zA-Z0-9_.]+)\s*(?:on\s+)?instagram',
+                r'ig:\s*@?([a-zA-Z0-9_.]+)',
+                r'follow\s+(?:me\s+on\s+)?instagram:\s*@?([a-zA-Z0-9_.]+)'
+            ]
+            
+            # TikTok URL patterns  
+            tiktok_patterns = [
+                r'https?://(?:www\.)?tiktok\.com/@([a-zA-Z0-9_.]+)/?',
+                r'tiktok\.com/@([a-zA-Z0-9_.]+)/?',
+                r'@([a-zA-Z0-9_.]+)\s*(?:on\s+)?tiktok',
+                r'tt:\s*@?([a-zA-Z0-9_.]+)',
+                r'follow\s+(?:me\s+on\s+)?tiktok:\s*@?([a-zA-Z0-9_.]+)'
+            ]
+            
+            # Search for Instagram URLs
+            for pattern in instagram_patterns:
+                match = re.search(pattern, description, re.IGNORECASE)
+                if match:
+                    username = match.group(1)
+                    instagram_url = f"https://instagram.com/{username}"
+                    break
+            
+            # Search for TikTok URLs
+            for pattern in tiktok_patterns:
+                match = re.search(pattern, description, re.IGNORECASE)
+                if match:
+                    username = match.group(1)
+                    tiktok_url = f"https://tiktok.com/@{username}"
+                    break
+                    
+        except Exception as e:
+            logger.debug(f"Error extracting social URLs from description: {e}")
+        
+        return instagram_url, tiktok_url
+    
+    async def _generate_likely_instagram_url(self, search_name: str) -> str:
+        """
+        Generate likely Instagram profile URL using artist name patterns
         """
         try:
-            for pattern in search_patterns:
-                # Generate likely Instagram URL patterns
-                username_candidates = [
-                    pattern.replace('@', '').replace(' ', ''),
-                    pattern.replace('@', '').replace(' ', '_'),
-                    pattern.replace('@', '').replace(' ', '.'),
-                    pattern.replace('@', '').replace(' ', '').lower()
-                ]
+            # Generate username candidates from artist name
+            username_candidates = [
+                search_name.replace(' ', ''),
+                search_name.replace(' ', '_'),
+                search_name.replace(' ', '.'),
+                search_name.replace(' ', '').lower()
+            ]
+            
+            for username in username_candidates:
+                # Skip invalid usernames
+                if not username or len(username) < 2 or len(username) > 30:
+                    continue
                 
-                for username in username_candidates:
-                    # Skip invalid usernames
-                    if not username or len(username) < 2 or len(username) > 30:
-                        continue
+                # Remove special characters except dots and underscores
+                clean_username = ''.join(c for c in username if c.isalnum() or c in '._')
+                if clean_username != username:
+                    continue
                     
-                    # Remove special characters except dots and underscores
-                    clean_username = ''.join(c for c in username if c.isalnum() or c in '._')
-                    if clean_username != username:
-                        continue
-                        
-                    # Simple validation check (can be enhanced with actual API calls)
-                    instagram_url = f"https://instagram.com/{clean_username}"
-                    
-                    # For now, return the first plausible URL
-                    # TODO: Add actual validation by checking if profile exists
-                    if len(clean_username) >= 3:  # Instagram minimum username length
-                        return instagram_url
+                # Generate likely Instagram URL
+                instagram_url = f"https://instagram.com/{clean_username}"
+                
+                # Return the first plausible URL
+                if len(clean_username) >= 3:  # Instagram minimum username length
+                    return instagram_url
                         
         except Exception as e:
             logger.debug(f"Error searching Instagram: {e}")
         
         return ""
     
-    async def _search_tiktok_profile(self, search_patterns: List[str]) -> str:
+    async def _generate_likely_tiktok_url(self, search_name: str) -> str:
         """
-        Search for TikTok profile using various patterns
-        Uses simple pattern-based search (can be enhanced with Apify TikTok scraper)
+        Generate likely TikTok profile URL using artist name patterns
         """
         try:
-            for pattern in search_patterns:
-                # Generate likely TikTok URL patterns
-                username_candidates = [
-                    pattern.replace('@', '').replace(' ', ''),
-                    pattern.replace('@', '').replace(' ', '_'),
-                    pattern.replace('@', '').replace(' ', '.'),
-                    pattern.replace('@', '').replace(' ', '').lower()
-                ]
+            # Generate username candidates from artist name
+            username_candidates = [
+                search_name.replace(' ', ''),
+                search_name.replace(' ', '_'),
+                search_name.replace(' ', '.'),
+                search_name.replace(' ', '').lower()
+            ]
+            
+            for username in username_candidates:
+                # Skip invalid usernames
+                if not username or len(username) < 2 or len(username) > 24:  # TikTok username limits
+                    continue
                 
-                for username in username_candidates:
-                    # Skip invalid usernames
-                    if not username or len(username) < 2 or len(username) > 24:  # TikTok username limits
-                        continue
+                # Remove special characters except dots and underscores
+                clean_username = ''.join(c for c in username if c.isalnum() or c in '._')
+                if clean_username != username:
+                    continue
                     
-                    # Remove special characters except dots and underscores
-                    clean_username = ''.join(c for c in username if c.isalnum() or c in '._')
-                    if clean_username != username:
-                        continue
-                        
-                    # Simple validation check (can be enhanced with actual API calls)
-                    tiktok_url = f"https://tiktok.com/@{clean_username}"
-                    
-                    # For now, return the first plausible URL
-                    # TODO: Add actual validation by checking if profile exists
-                    if len(clean_username) >= 2:  # TikTok minimum username length
-                        return tiktok_url
+                # Generate likely TikTok URL
+                tiktok_url = f"https://tiktok.com/@{clean_username}"
+                
+                # Return the first plausible URL
+                if len(clean_username) >= 2:  # TikTok minimum username length
+                    return tiktok_url
                         
         except Exception as e:
             logger.debug(f"Error searching TikTok: {e}")
