@@ -13,4 +13,5 @@ beautifulsoup4
 python-dotenv
 sentry-sdk[fastapi]
 google-api-python-client
-spotipy 
+spotipy
+firecrawl-py
