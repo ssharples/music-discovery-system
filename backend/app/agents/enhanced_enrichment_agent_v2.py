@@ -271,6 +271,35 @@ class EnhancedEnrichmentAgentV2:
             else:
                 logger.info(f"🔥 FIRECRAWL DEBUG: No Spotify ID available for lyrics analysis")
             
+            # Enhanced Step 3: Web Presence Search (NEW)
+            logger.info(f"🔥 FIRECRAWL DEBUG: STEP 3 - Web presence search")
+            search_results = await self._search_artist_web_presence(artist_profile.name)
+            enrichment_result["firecrawl_operations"].append(f"web_search: {len(search_results)} queries")
+            
+            # Extract additional contact info from search results
+            if search_results:
+                search_contact_info = await self._extract_contact_from_search_results(search_results)
+                
+                # Merge with existing contact info
+                if search_contact_info["emails"]:
+                    artist_profile.email = search_contact_info["emails"][0]
+                    logger.info(f"🔥 FIRECRAWL DEBUG: Found email via search: {search_contact_info['emails'][0]}")
+                
+                if search_contact_info["social_media"]:
+                    for platform, url in search_contact_info["social_media"].items():
+                        if platform == "instagram":
+                            artist_profile.instagram_handle = self._extract_username_from_url(url)
+                            logger.info(f"🔗 Using Instagram handle from search: {artist_profile.instagram_handle}")
+                        else:
+                            logger.info(f"🔥 FIRECRAWL DEBUG: Found social media link from search: {platform} - {url}")
+                
+                if search_contact_info["booking_info"]:
+                    if "booking" not in artist_profile.metadata:
+                        artist_profile.metadata["booking"] = []
+                    artist_profile.metadata["booking"].extend(search_contact_info["booking_info"])
+                
+                logger.info(f"🔍 SEARCH API: Enhanced contact info with {len(search_contact_info['emails'])} emails, {len(search_contact_info['social_media'])} social links")
+            
             # Calculate enhanced enrichment score
             artist_profile.enrichment_score = self._calculate_comprehensive_score(
                 artist_profile, enrichment_result
@@ -1157,6 +1186,196 @@ class EnhancedEnrichmentAgentV2:
             score += 0.10
         
         return min(score, 1.0)
+
+    async def _search_artist_web_presence(self, artist_name: str) -> Dict[str, Any]:
+        """
+        NEW: Use Firecrawl Search API to discover artist's web presence across the internet
+        """
+        logger.info(f"🔍 SEARCH API: Starting comprehensive web search for {artist_name}")
+        
+        if not self.firecrawl_app:
+            logger.warning("🔍 SEARCH API: Firecrawl not available, skipping web search")
+            return {}
+        
+        search_results = {}
+        
+        try:
+            # Search for official websites and social media
+            search_queries = [
+                f'"{artist_name}" official website',
+                f'"{artist_name}" instagram',
+                f'"{artist_name}" twitter',
+                f'"{artist_name}" soundcloud',
+                f'"{artist_name}" bandcamp',
+                f'"{artist_name}" linktree',
+                f'"{artist_name}" contact booking email'
+            ]
+            
+            for query in search_queries:
+                try:
+                    logger.info(f"🔍 SEARCH API: Searching for '{query}'")
+                    
+                    # Use Firecrawl Search API with optimized parameters
+                    search_result = self.firecrawl_app.search(
+                        query=query,
+                        limit=5,  # Top 5 results per query
+                        country="us",  # Can be configurable
+                        language="en",
+                        time_range="month",  # Recent results for better relevance
+                        formats=["markdown", "links"]  # Get both content and URLs
+                    )
+                    
+                    if search_result.get("success") and search_result.get("data"):
+                        search_results[query] = search_result["data"]
+                        logger.info(f"🔍 SEARCH API: Found {len(search_result['data'])} results for '{query}'")
+                    
+                except Exception as e:
+                    logger.error(f"🔍 SEARCH API: Failed to search for '{query}': {str(e)}")
+                    continue
+            
+            return search_results
+            
+        except Exception as e:
+            logger.error(f"🔍 SEARCH API: Web search failed for {artist_name}: {str(e)}")
+            return {}
+
+    async def _extract_contact_from_search_results(self, search_results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        NEW: Extract contact information from search results using AI
+        """
+        contact_info = {
+            "emails": [],
+            "websites": [],
+            "social_media": {},
+            "booking_info": []
+        }
+        
+        if not search_results:
+            return contact_info
+        
+        try:
+            # Process search results to extract structured contact data
+            for query, results in search_results.items():
+                if not results:
+                    continue
+                
+                for result in results:
+                    content = result.get("markdown", "")
+                    url = result.get("url", "")
+                    
+                    # Extract emails
+                    import re
+                    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', content)
+                    contact_info["emails"].extend(emails)
+                    
+                    # Categorize URLs
+                    if "instagram.com" in url:
+                        contact_info["social_media"]["instagram"] = url
+                    elif "twitter.com" in url or "x.com" in url:
+                        contact_info["social_media"]["twitter"] = url
+                    elif "soundcloud.com" in url:
+                        contact_info["social_media"]["soundcloud"] = url
+                    elif "bandcamp.com" in url:
+                        contact_info["social_media"]["bandcamp"] = url
+                    elif "linktree" in url or "linktr.ee" in url:
+                        contact_info["websites"].append({"type": "linktree", "url": url})
+                    elif any(keyword in content.lower() for keyword in ["booking", "contact", "management"]):
+                        contact_info["booking_info"].append({"url": url, "content": content[:200]})
+                    
+            # Remove duplicates
+            contact_info["emails"] = list(set(contact_info["emails"]))
+            
+            logger.info(f"🔍 SEARCH API: Extracted contact info - Emails: {len(contact_info['emails'])}, Social: {len(contact_info['social_media'])}")
+            return contact_info
+            
+        except Exception as e:
+            logger.error(f"🔍 SEARCH API: Failed to extract contact info: {str(e)}")
+            return contact_info
+
+    async def _discover_emerging_talent_via_search(self, genre_keywords: List[str]) -> List[Dict[str, Any]]:
+        """
+        NEW: Discover emerging artists using targeted search queries
+        """
+        logger.info(f"🔍 SEARCH API: Discovering emerging talent for genres: {genre_keywords}")
+        
+        if not self.firecrawl_app:
+            return []
+        
+        discovered_artists = []
+        
+        try:
+            # Create search queries for emerging talent discovery
+            search_queries = []
+            for genre in genre_keywords:
+                search_queries.extend([
+                    f'"{genre}" emerging artist 2024',
+                    f'new "{genre}" musicians unsigned',
+                    f'independent "{genre}" artist discovery',
+                    f'"{genre}" artist under 10k followers',
+                    f'"{genre}" music blog new talent'
+                ])
+            
+            for query in search_queries:
+                try:
+                    search_result = self.firecrawl_app.search(
+                        query=query,
+                        limit=10,
+                        time_range="week",  # Very recent for emerging talent
+                        country="us",
+                        language="en",
+                        formats=["markdown", "links"]
+                    )
+                    
+                    if search_result.get("success") and search_result.get("data"):
+                        # Process results to extract artist names and details
+                        for result in search_result["data"]:
+                            content = result.get("markdown", "")
+                            url = result.get("url", "")
+                            
+                            # Extract potential artist names and info
+                            artist_data = self._extract_artist_from_content(content, url)
+                            if artist_data:
+                                discovered_artists.append(artist_data)
+                
+                except Exception as e:
+                    logger.error(f"🔍 SEARCH API: Failed emerging talent search for '{query}': {str(e)}")
+                    continue
+            
+            logger.info(f"🔍 SEARCH API: Discovered {len(discovered_artists)} potential emerging artists")
+            return discovered_artists[:50]  # Limit results
+            
+        except Exception as e:
+            logger.error(f"🔍 SEARCH API: Emerging talent discovery failed: {str(e)}")
+            return []
+
+    def _extract_artist_from_content(self, content: str, url: str) -> Optional[Dict[str, Any]]:
+        """
+        Extract artist information from search result content
+        """
+        # This would use AI to extract structured artist data
+        # For now, simple implementation
+        import re
+        
+        # Look for artist patterns in content
+        artist_patterns = [
+            r'artist[:\s]+([A-Za-z0-9\s]+)',
+            r'musician[:\s]+([A-Za-z0-9\s]+)',
+            r'singer[:\s]+([A-Za-z0-9\s]+)'
+        ]
+        
+        for pattern in artist_patterns:
+            matches = re.findall(pattern, content, re.IGNORECASE)
+            if matches:
+                artist_name = matches[0].strip()
+                if len(artist_name) > 2 and len(artist_name) < 50:
+                    return {
+                        "name": artist_name,
+                        "source_url": url,
+                        "discovery_context": content[:200],
+                        "discovery_method": "search_api"
+                    }
+        
+        return None
 
 def get_enhanced_enrichment_agent_v2() -> EnhancedEnrichmentAgentV2:
     """Factory function to get enhanced enrichment agent instance"""
