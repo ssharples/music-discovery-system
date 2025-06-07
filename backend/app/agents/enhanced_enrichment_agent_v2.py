@@ -26,8 +26,16 @@ from app.models.artist import ArtistProfile, LyricAnalysis
 try:
     from firecrawl import FirecrawlApp
     FIRECRAWL_AVAILABLE = True
-except ImportError:
-    FIRECRAWL_AVAILABLE = False
+    FIRECRAWL_IMPORT_ERROR = None
+except ImportError as e:
+    try:
+        # Try alternative import path
+        from firecrawl.firecrawl import FirecrawlApp
+        FIRECRAWL_AVAILABLE = True
+        FIRECRAWL_IMPORT_ERROR = None
+    except ImportError as e2:
+        FIRECRAWL_AVAILABLE = False
+        FIRECRAWL_IMPORT_ERROR = f"Primary: {str(e)}, Secondary: {str(e2)}"
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +84,8 @@ class EnhancedEnrichmentAgentV2:
         # Enhanced debugging for Firecrawl initialization
         logger.info(f"🔥 FIRECRAWL DEBUG: EnhancedEnrichmentAgentV2 initialization starting...")
         logger.info(f"🔥 FIRECRAWL DEBUG: FIRECRAWL_AVAILABLE = {FIRECRAWL_AVAILABLE}")
+        if not FIRECRAWL_AVAILABLE:
+            logger.error(f"🔥 FIRECRAWL DEBUG: Import error: {FIRECRAWL_IMPORT_ERROR}")
         logger.info(f"🔥 FIRECRAWL DEBUG: settings.FIRECRAWL_API_KEY exists = {bool(settings.FIRECRAWL_API_KEY)}")
         logger.info(f"🔥 FIRECRAWL DEBUG: settings.FIRECRAWL_API_KEY length = {len(settings.FIRECRAWL_API_KEY) if settings.FIRECRAWL_API_KEY else 0}")
         logger.info(f"🔥 FIRECRAWL DEBUG: settings.is_firecrawl_configured() = {settings.is_firecrawl_configured()}")
