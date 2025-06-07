@@ -95,14 +95,37 @@ class SimpleEnhancedEnrichmentAgent:
                 "video_count": artist_profile.metadata.get("video_count", 0)
             }
             
-            # Enhanced data gathering with Firecrawl
-            logger.info(f"🔥 Attempting Firecrawl enrichment for {artist_profile.name}...")
-            firecrawl_data = await self._gather_firecrawl_data(artist_profile, deps)
+            # Check if we already have social media URLs from YouTube discovery
+            existing_social_media = self._extract_existing_social_media(artist_profile)
+            if existing_social_media:
+                logger.info(f"🔗 Found existing social media URLs for {artist_profile.name}: {list(existing_social_media.keys())}")
+                basic_info["social_media_urls"] = existing_social_media
+                basic_info["social_media_source"] = "youtube_discovery"
+                
+                # Store social media data in profile for database persistence
+                if not hasattr(artist_profile, 'social_links') or not artist_profile.social_links:
+                    artist_profile.social_links = []
+                
+                # Add URLs to social_links if not already there
+                for platform, url in existing_social_media.items():
+                    if url not in artist_profile.social_links:
+                        artist_profile.social_links.append(url)
+                
+                # Skip Firecrawl for social media discovery since we already have URLs
+                logger.info(f"⏭️ Skipping Firecrawl social media discovery for {artist_profile.name} - URLs already found from YouTube")
+                firecrawl_data = None
+            else:
+                # Enhanced data gathering with Firecrawl only if no social media URLs found
+                logger.info(f"🔥 Attempting Firecrawl enrichment for {artist_profile.name}...")
+                firecrawl_data = await self._gather_firecrawl_data(artist_profile, deps)
+            
             if firecrawl_data:
                 basic_info.update(firecrawl_data)
                 logger.info(f"🔥 Enhanced data with Firecrawl for {artist_profile.name}")
+            elif existing_social_media:
+                logger.info(f"✅ Using existing social media data instead of Firecrawl for {artist_profile.name}")
             else:
-                logger.info(f"⚠️ No Firecrawl data gathered for {artist_profile.name}")
+                logger.info(f"⚠️ No social media data gathered for {artist_profile.name}")
             
             # Spotify data gathering
             logger.info(f"🎵 Attempting Spotify enrichment for {artist_profile.name}...")
@@ -112,69 +135,106 @@ class SimpleEnhancedEnrichmentAgent:
                 logger.info(f"🎵 Enhanced data with Spotify for {artist_profile.name}")
             else:
                 logger.info(f"⚠️ No Spotify data gathered for {artist_profile.name}")
-
-            # Use AI agent if available
-            if self.agent:
-                analysis_prompt = f"""
-                Analyze this artist data and provide enrichment insights:
-                
-                Artist: {artist_profile.name}
-                YouTube Subscribers: {basic_info.get('subscriber_count', 0)}
-                Video Count: {basic_info.get('video_count', 0)}
-                Social Links: {basic_info.get('social_links', [])}
-                
-                Please provide:
-                1. Likely genre based on the data
-                2. Artist career stage (emerging/established)
-                3. Contact discovery suggestions
-                4. Data quality score (0-100)
-                5. Key recommendations for music industry professionals
-                
-                Return as JSON with keys: genre, career_stage, contact_suggestions, quality_score, recommendations
-                """
-                
-                try:
-                    result = await self.agent.run(analysis_prompt, deps=deps)
-                    
-                    if result and hasattr(result, 'data'):
-                        ai_insights = result.data
-                        logger.info(f"✅ AI enrichment completed for {artist_profile.name}")
-                        
-                        return {
-                            "success": True,
-                            "artist_name": artist_profile.name,
-                            "basic_info": basic_info,
-                            "ai_insights": ai_insights,
-                            "enrichment_score": 0.75,  # Default good score (0-1 scale)
-                            "data_sources": ["youtube", "ai_analysis"],
-                            "processed_at": datetime.now().isoformat()
-                        }
-                        
-                except Exception as e:
-                    logger.error(f"❌ AI enrichment failed: {e}")
-                    # Fallback to basic enrichment
             
-            # Basic enrichment without AI
-            basic_score = self._calculate_basic_score(basic_info)
+            # Calculate enrichment score using enhanced scoring
+            enrichment_score = self._calculate_basic_score(basic_info)
+            
+            # Update artist profile with enrichment data
+            artist_profile.enrichment_score = enrichment_score
+            artist_profile.metadata.update({
+                "enrichment_performed": True,
+                "enrichment_timestamp": datetime.now().isoformat(),
+                "enrichment_method": "simple_enhanced_agent",
+                "social_media_discovered": bool(existing_social_media or firecrawl_data),
+                "firecrawl_skipped": bool(existing_social_media)
+            })
             
             return {
                 "success": True,
                 "artist_name": artist_profile.name,
-                "basic_info": basic_info,
-                "enrichment_score": basic_score,
-                "data_sources": ["youtube"],
-                "processed_at": datetime.now().isoformat(),
-                "fallback_mode": True
+                "enrichment_score": enrichment_score,
+                "data_gathered": basic_info,
+                "social_media_source": basic_info.get("social_media_source", "none"),
+                "firecrawl_used": bool(firecrawl_data),
+                "existing_social_media_found": bool(existing_social_media)
             }
-            
+        
         except Exception as e:
-            logger.error(f"❌ Enrichment failed for {artist_profile.name}: {e}")
+            logger.error(f"❌ Basic enrichment failed for {artist_profile.name}: {e}")
             return {
                 "success": False,
-                "artist_name": artist_profile.name,
                 "error": str(e),
-                "processed_at": datetime.now().isoformat()
+                "artist_name": artist_profile.name,
+                "enrichment_score": 0.0
             }
+
+    def _extract_existing_social_media(self, artist_profile: ArtistProfile) -> Dict[str, str]:
+        """Extract existing social media URLs from YouTube discovery data"""
+        social_media_urls = {}
+        
+        try:
+            # Check YouTube data in metadata
+            youtube_data = artist_profile.metadata.get("youtube_data", {})
+            
+            # Look for social media data in video metadata
+            if "social_media" in youtube_data:
+                social_data = youtube_data["social_media"]
+                logger.debug(f"Found social media data in YouTube metadata: {social_data}")
+                
+                # Extract URLs from different platforms
+                for platform, url in social_data.get("urls", {}).items():
+                    if url and self._is_valid_social_url(url):
+                        social_media_urls[platform] = url
+                        logger.debug(f"Added {platform} URL: {url}")
+            
+            # Also check if social links are already populated
+            if hasattr(artist_profile, 'social_links') and artist_profile.social_links:
+                for link in artist_profile.social_links:
+                    platform = self._detect_platform_from_url(link)
+                    if platform and link not in social_media_urls.values():
+                        social_media_urls[platform] = link
+                        logger.debug(f"Added existing {platform} URL: {link}")
+            
+            # Check for social media data in recent videos
+            recent_videos = youtube_data.get("recent_videos", [])
+            for video in recent_videos:
+                if "social_media" in video:
+                    video_social = video["social_media"]
+                    for platform, url in video_social.get("urls", {}).items():
+                        if url and self._is_valid_social_url(url) and platform not in social_media_urls:
+                            social_media_urls[platform] = url
+                            logger.debug(f"Added {platform} URL from video: {url}")
+            
+        except Exception as e:
+            logger.warning(f"Error extracting existing social media data: {e}")
+        
+        return social_media_urls
+    
+    def _is_valid_social_url(self, url: str) -> bool:
+        """Validate if URL is a proper social media URL"""
+        if not url or not isinstance(url, str):
+            return False
+        
+        # Basic URL validation
+        return (url.startswith(('http://', 'https://')) and 
+                any(domain in url.lower() for domain in ['instagram.com', 'tiktok.com', 'twitter.com', 'x.com', 'facebook.com']))
+    
+    def _detect_platform_from_url(self, url: str) -> Optional[str]:
+        """Detect social media platform from URL"""
+        if not url:
+            return None
+        
+        url_lower = url.lower()
+        if 'instagram.com' in url_lower:
+            return 'instagram'
+        elif 'tiktok.com' in url_lower:
+            return 'tiktok'
+        elif 'twitter.com' in url_lower or 'x.com' in url_lower:
+            return 'twitter'
+        elif 'facebook.com' in url_lower:
+            return 'facebook'
+        
+        return None
     
     def _calculate_basic_score(self, basic_info: Dict[str, Any]) -> float:
         """Calculate basic enrichment score without AI"""
@@ -200,10 +260,20 @@ class SimpleEnhancedEnrichmentAgent:
             if video_count > 10:
                 score += 10
         
-        # Social media presence
+        # Social media presence (enhanced scoring)
         social_links = basic_info.get("social_links", [])
+        social_media_urls = basic_info.get("social_media_urls", {})
+        
         if social_links:
             score += 10
+            logger.debug(f"Social links bonus: +10 points ({len(social_links)} links)")
+        
+        # Bonus for discovered social media URLs from YouTube
+        if social_media_urls:
+            score += 15  # Higher bonus for validated social media URLs
+            if len(social_media_urls) > 1:
+                score += 5  # Multiple platforms bonus
+            logger.debug(f"Social media URLs bonus: +15-20 points ({len(social_media_urls)} platforms: {list(social_media_urls.keys())})")
         
         # Firecrawl enrichment bonus
         if basic_info.get("firecrawl_sources"):
