@@ -109,6 +109,8 @@ class EnhancedEnrichmentAgentV2:
         """Comprehensive artist enrichment with all features"""
         
         logger.info(f"🎯 Starting comprehensive enrichment for {artist_profile.name}")
+        logger.info(f"🔥 FIRECRAWL DEBUG: V2 Enrichment Agent initialized - Firecrawl available: {self.firecrawl_app is not None}")
+        logger.info(f"🔥 FIRECRAWL DEBUG: AI Agent available: {self.ai_agent is not None}")
         
         # Ensure lyrical_themes is initialized to prevent validation errors
         if artist_profile.lyrical_themes is None:
@@ -123,11 +125,16 @@ class EnhancedEnrichmentAgentV2:
             "lyrics_analyzed": False,
             "errors": [],
             "data": {},
-            "enriched_profile": artist_profile  # Return the enriched profile
+            "enriched_profile": artist_profile,  # Return the enriched profile
+            "firecrawl_operations": []  # Track Firecrawl operations
         }
+        
+        logger.info(f"🔥 FIRECRAWL DEBUG: Starting enrichment pipeline for {artist_profile.name}")
+        logger.info(f"🔥 FIRECRAWL DEBUG: Initial profile data - Instagram: {artist_profile.instagram_handle}, Spotify: {artist_profile.spotify_id}")
         
         try:
             # Step 1: Get Spotify artist data and validate
+            logger.info(f"🔥 FIRECRAWL DEBUG: STEP 1 - Spotify API enrichment")
             spotify_data = await self._get_spotify_artist_data(deps, artist_profile)
             if spotify_data:
                 enrichment_result["data"]["spotify"] = spotify_data
@@ -140,10 +147,15 @@ class EnhancedEnrichmentAgentV2:
                 artist_profile.follower_counts["spotify"] = spotify_data.get("followers", 0)
                 
                 logger.info(f"✅ Spotify data retrieved for {artist_profile.name}")
+                logger.info(f"🔥 FIRECRAWL DEBUG: Spotify enrichment completed - ID: {spotify_data['id']}, Followers: {spotify_data.get('followers', 0)}")
+            else:
+                logger.info(f"🔥 FIRECRAWL DEBUG: No Spotify data found for {artist_profile.name}")
             
             # Step 2: Scrape and validate Instagram using Firecrawl
+            logger.info(f"🔥 FIRECRAWL DEBUG: STEP 2 - Instagram Firecrawl enrichment")
             if artist_profile.instagram_handle or self._find_instagram_handle(artist_profile):
                 if self.firecrawl_app:
+                    enrichment_result["firecrawl_operations"].append("instagram_profile")
                     instagram_data = await self._scrape_instagram_profile(artist_profile)
                     if instagram_data:
                         enrichment_result["data"]["instagram"] = instagram_data
@@ -152,24 +164,36 @@ class EnhancedEnrichmentAgentV2:
                         # Update artist profile
                         artist_profile.follower_counts["instagram"] = instagram_data.get("follower_count", 0)
                         
+                        logger.info(f"🔥 FIRECRAWL DEBUG: Instagram enrichment completed - Followers: {instagram_data.get('follower_count', 0)}")
+                        
                         # Extract contact info from link in bio
                         if instagram_data.get("link_in_bio"):
+                            logger.info(f"🔥 FIRECRAWL DEBUG: Found link in bio: {instagram_data['link_in_bio']}")
+                            enrichment_result["firecrawl_operations"].append("contact_extraction")
                             contact_info = await self._extract_contact_from_url(instagram_data["link_in_bio"])
                             if contact_info:
                                 if contact_info.get("email"):
                                     artist_profile.email = contact_info["email"]
+                                    logger.info(f"🔥 FIRECRAWL DEBUG: Email extracted: {contact_info['email']}")
                                 if contact_info.get("location"):
                                     artist_profile.location = contact_info["location"]
+                                    logger.info(f"🔥 FIRECRAWL DEBUG: Location extracted: {contact_info['location']}")
                         
                         # Validate Spotify if found in Instagram
                         if instagram_data.get("has_spotify_link") and spotify_data:
                             enrichment_result["spotify_validated"] = True
                             logger.info(f"✅ Spotify validated via Instagram for {artist_profile.name}")
+                    else:
+                        logger.info(f"🔥 FIRECRAWL DEBUG: Instagram scraping failed for {artist_profile.name}")
                 else:
                     logger.warning(f"⚠️ Firecrawl not available, skipping Instagram enrichment for {artist_profile.name}")
+            else:
+                logger.info(f"🔥 FIRECRAWL DEBUG: No Instagram handle found for {artist_profile.name}")
             
             # Step 3: Scrape Spotify profile for additional data using Firecrawl
+            logger.info(f"🔥 FIRECRAWL DEBUG: STEP 3 - Spotify profile Firecrawl scraping")
             if artist_profile.spotify_id and self.firecrawl_app:
+                enrichment_result["firecrawl_operations"].append("spotify_profile")
                 spotify_profile_data = await self._scrape_spotify_profile(artist_profile.spotify_id)
                 if spotify_profile_data:
                     enrichment_result["data"]["spotify_profile"] = spotify_profile_data
@@ -178,15 +202,26 @@ class EnhancedEnrichmentAgentV2:
                     # Update artist bio if found
                     if spotify_profile_data.get("bio") and not artist_profile.bio:
                         artist_profile.bio = spotify_profile_data["bio"]
+                        logger.info(f"🔥 FIRECRAWL DEBUG: Bio extracted from Spotify profile")
                     
                     # Store monthly listeners
                     artist_profile.metadata["monthly_listeners"] = spotify_profile_data.get("monthly_listeners", 0)
                     artist_profile.metadata["top_cities"] = spotify_profile_data.get("top_cities", [])
+                    
+                    logger.info(f"🔥 FIRECRAWL DEBUG: Spotify profile scraped - Monthly listeners: {spotify_profile_data.get('monthly_listeners', 0)}")
+                else:
+                    logger.info(f"🔥 FIRECRAWL DEBUG: Spotify profile scraping failed")
+            else:
+                logger.info(f"🔥 FIRECRAWL DEBUG: Skipping Spotify profile scraping - ID: {artist_profile.spotify_id}, Firecrawl: {self.firecrawl_app is not None}")
             
             # Step 4: Get top songs and analyze lyrics using Firecrawl
+            logger.info(f"🔥 FIRECRAWL DEBUG: STEP 4 - Lyrics analysis via Firecrawl")
             if artist_profile.spotify_id:
                 top_songs = await self._get_artist_top_songs(deps, artist_profile.spotify_id)
+                logger.info(f"🔥 FIRECRAWL DEBUG: Retrieved {len(top_songs) if top_songs else 0} top songs")
+                
                 if top_songs and self.firecrawl_app:
+                    enrichment_result["firecrawl_operations"].append("lyrics_scraping")
                     lyrical_themes = await self._analyze_song_lyrics(artist_profile.name, top_songs[:3])
                     if lyrical_themes:
                         enrichment_result["data"]["lyrical_analysis"] = lyrical_themes
@@ -196,9 +231,16 @@ class EnhancedEnrichmentAgentV2:
                         themes = lyrical_themes.get("themes", [])
                         if isinstance(themes, list):
                             artist_profile.lyrical_themes = themes
+                            logger.info(f"🔥 FIRECRAWL DEBUG: Lyrical themes extracted: {themes}")
                         else:
                             artist_profile.lyrical_themes = []
                             logger.warning(f"Lyrical themes not in expected list format: {themes}")
+                    else:
+                        logger.info(f"🔥 FIRECRAWL DEBUG: Lyrics analysis failed - no themes extracted")
+                else:
+                    logger.info(f"🔥 FIRECRAWL DEBUG: Skipping lyrics analysis - Songs: {len(top_songs) if top_songs else 0}, Firecrawl: {self.firecrawl_app is not None}")
+            else:
+                logger.info(f"🔥 FIRECRAWL DEBUG: No Spotify ID available for lyrics analysis")
             
             # Calculate enhanced enrichment score
             artist_profile.enrichment_score = self._calculate_comprehensive_score(
@@ -218,7 +260,8 @@ class EnhancedEnrichmentAgentV2:
                 "firecrawl_usage": {
                     "instagram_scraped": enrichment_result["instagram_enriched"],
                     "spotify_profile_scraped": enrichment_result["spotify_profile_scraped"],
-                    "lyrics_scraped": enrichment_result["lyrics_analyzed"]
+                    "lyrics_scraped": enrichment_result["lyrics_analyzed"],
+                    "operations_performed": enrichment_result["firecrawl_operations"]
                 }
             })
             
@@ -226,9 +269,16 @@ class EnhancedEnrichmentAgentV2:
             enrichment_result["enriched_profile"] = artist_profile
             
             logger.info(f"🎨 Comprehensive enrichment completed for {artist_profile.name} (score: {artist_profile.enrichment_score:.2f})")
+            logger.info(f"🔥 FIRECRAWL DEBUG: V2 Enrichment Summary:")
+            logger.info(f"🔥 FIRECRAWL DEBUG: - Spotify API: {'✅' if enrichment_result['spotify_validated'] else '❌'}")
+            logger.info(f"🔥 FIRECRAWL DEBUG: - Instagram Scraping: {'✅' if enrichment_result['instagram_enriched'] else '❌'}")
+            logger.info(f"🔥 FIRECRAWL DEBUG: - Spotify Profile Scraping: {'✅' if enrichment_result['spotify_profile_scraped'] else '❌'}")
+            logger.info(f"🔥 FIRECRAWL DEBUG: - Lyrics Analysis: {'✅' if enrichment_result['lyrics_analyzed'] else '❌'}")
+            logger.info(f"🔥 FIRECRAWL DEBUG: - Firecrawl Operations: {enrichment_result['firecrawl_operations']}")
             
         except Exception as e:
             logger.error(f"❌ Comprehensive enrichment failed for {artist_profile.name}: {e}")
+            logger.error(f"🔥 FIRECRAWL DEBUG: Exception during enrichment - Type: {type(e).__name__}, Message: {str(e)}")
             enrichment_result["success"] = False
             enrichment_result["errors"].append(str(e))
             enrichment_result["enriched_profile"] = artist_profile  # Return profile even on error
@@ -369,106 +419,62 @@ class EnhancedEnrichmentAgentV2:
         self,
         artist_profile: ArtistProfile
     ) -> Optional[Dict[str, Any]]:
-        """Scrape Instagram profile for follower count and link in bio"""
-        
-        if not self.firecrawl_app or not artist_profile.instagram_handle:
-            return None
-        
-        try:
-            instagram_url = f"https://www.instagram.com/{artist_profile.instagram_handle}/"
-            
-            # Define extraction schema for Instagram
-            extraction_schema = {
-                "type": "object",
-                "properties": {
-                    "follower_count": {"type": "string"},
-                    "bio": {"type": "string"},
-                    "external_url": {"type": "string"},
-                    "is_verified": {"type": "boolean"},
-                    "posts_count": {"type": "string"}
-                }
-            }
-            
-            result = self.firecrawl_app.scrape_url(
-                url=instagram_url,
-                params={
-                    'formats': ['extract', 'markdown'],
-                    'extract': {
-                        'schema': extraction_schema
-                    },
-                    'timeout': 30000,
-                    'waitFor': 2000
-                }
-            )
-            
-            if result and result.get('success'):
-                extracted_data = result.get('extract', {})
-                markdown_content = result.get('markdown', '')
-                
-                # Parse follower count
-                follower_count = self._parse_follower_count(extracted_data.get('follower_count', ''))
-                
-                # Check for Spotify link
-                has_spotify_link = False
-                spotify_url = None
-                if 'spotify' in markdown_content.lower():
-                    has_spotify_link = True
-                    # Extract Spotify URL if present
-                    spotify_match = re.search(r'(https?://[^\s]*spotify[^\s]*)', markdown_content)
-                    if spotify_match:
-                        spotify_url = spotify_match.group(1)
-                
-                return {
-                    "username": artist_profile.instagram_handle,
-                    "follower_count": follower_count,
-                    "bio": extracted_data.get('bio', ''),
-                    "link_in_bio": extracted_data.get('external_url'),
-                    "is_verified": extracted_data.get('is_verified', False),
-                    "has_spotify_link": has_spotify_link,
-                    "spotify_url": spotify_url
-                }
-                
-        except Exception as e:
-            logger.error(f"Instagram scraping error: {e}")
-            return None
-    
-    async def _scrape_spotify_profile(
-        self,
-        spotify_artist_id: str
-    ) -> Optional[Dict[str, Any]]:
-        """Scrape Spotify artist profile for monthly listeners and top cities"""
+        """Scrape Instagram profile using Firecrawl with structured extraction"""
         
         if not self.firecrawl_app:
+            logger.warning("🔥 Firecrawl not available for Instagram scraping")
             return None
         
-        try:
-            spotify_url = f"https://open.spotify.com/artist/{spotify_artist_id}"
+        instagram_handle = artist_profile.instagram_handle
+        if not instagram_handle:
+            instagram_handle = self._find_instagram_handle(artist_profile)
             
-            # Define extraction schema for Spotify profile
+        if not instagram_handle:
+            logger.info(f"📷 No Instagram handle found for {artist_profile.name}")
+            return None
+        
+        instagram_url = f"https://www.instagram.com/{instagram_handle}/"
+        logger.info(f"🔥 FIRECRAWL DEBUG: Starting Instagram scrape for {artist_profile.name}")
+        logger.info(f"🔥 FIRECRAWL DEBUG: Target URL: {instagram_url}")
+        logger.info(f"🔥 FIRECRAWL DEBUG: Instagram handle: {instagram_handle}")
+        
+        try:
+            # Define extraction schema for Instagram profile
             extraction_schema = {
                 "type": "object",
                 "properties": {
-                    "monthly_listeners": {"type": "string"},
-                    "verified": {"type": "boolean"},
-                    "about": {"type": "string"},
-                    "top_cities": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "city": {"type": "string"},
-                                "country": {"type": "string"},
-                                "listeners": {"type": "string"}
-                            }
-                        }
+                    "follower_count": {
+                        "type": "string",
+                        "description": "Number of followers (e.g., '1.2M', '850K', '1,234')"
+                    },
+                    "bio": {
+                        "type": "string", 
+                        "description": "Profile bio/description text"
+                    },
+                    "link_in_bio": {
+                        "type": "string",
+                        "description": "URL link in bio section"
+                    },
+                    "is_verified": {
+                        "type": "boolean",
+                        "description": "Whether the account has verification badge"
+                    },
+                    "post_count": {
+                        "type": "string",
+                        "description": "Number of posts"
                     }
-                }
+                },
+                "required": ["follower_count"]
             }
             
-            result = self.firecrawl_app.scrape_url(
-                url=spotify_url,
+            logger.info(f"🔥 FIRECRAWL DEBUG: Using extraction schema: {extraction_schema}")
+            logger.info(f"🔥 FIRECRAWL DEBUG: Calling Firecrawl scrape with extract...")
+            
+            # Scrape with structured extraction
+            response = self.firecrawl_app.scrape_url(
+                instagram_url,
                 params={
-                    'formats': ['extract', 'markdown'],
+                    'formats': ['extract'],
                     'extract': {
                         'schema': extraction_schema
                     },
@@ -477,32 +483,159 @@ class EnhancedEnrichmentAgentV2:
                 }
             )
             
-            if result and result.get('success'):
-                extracted_data = result.get('extract', {})
-                markdown_content = result.get('markdown', '')
+            logger.info(f"🔥 FIRECRAWL DEBUG: Raw response received for {instagram_url}")
+            logger.info(f"🔥 FIRECRAWL DEBUG: Response keys: {list(response.keys()) if response else 'None'}")
+            
+            if not response:
+                logger.warning(f"🔥 FIRECRAWL DEBUG: Empty response from Firecrawl for {instagram_url}")
+                return None
                 
-                # Parse monthly listeners
-                monthly_listeners = self._parse_listener_count(
-                    extracted_data.get('monthly_listeners', '0')
-                )
+            if 'extract' not in response:
+                logger.warning(f"🔥 FIRECRAWL DEBUG: No 'extract' key in response: {response}")
+                return None
                 
-                # Extract bio/about section
-                bio = extracted_data.get('about', '')
-                if not bio and 'about' in markdown_content.lower():
-                    # Try to extract from markdown
-                    bio_match = re.search(r'about\s*\n+([^\n]{50,500})', markdown_content, re.IGNORECASE)
-                    if bio_match:
-                        bio = bio_match.group(1).strip()
-                
-                return {
-                    "monthly_listeners": monthly_listeners,
-                    "top_cities": extracted_data.get('top_cities', []),
-                    "bio": bio,
-                    "verified": extracted_data.get('verified', False)
-                }
-                
+            extracted_data = response['extract']
+            logger.info(f"🔥 FIRECRAWL DEBUG: Extracted data: {extracted_data}")
+            
+            if not extracted_data:
+                logger.warning(f"🔥 FIRECRAWL DEBUG: No data extracted from {instagram_url}")
+                return None
+            
+            # Process extracted data
+            result = {
+                "username": instagram_handle,
+                "follower_count": 0,
+                "bio": extracted_data.get("bio"),
+                "link_in_bio": extracted_data.get("link_in_bio"),
+                "is_verified": extracted_data.get("is_verified", False),
+                "has_spotify_link": False,
+                "spotify_url": None
+            }
+            
+            # Parse follower count
+            follower_str = extracted_data.get("follower_count", "0")
+            logger.info(f"🔥 FIRECRAWL DEBUG: Raw follower count string: '{follower_str}'")
+            
+            if follower_str:
+                result["follower_count"] = self._parse_follower_count(str(follower_str))
+                logger.info(f"🔥 FIRECRAWL DEBUG: Parsed follower count: {result['follower_count']}")
+            
+            # Check for Spotify links in bio or link
+            if result["bio"] or result["link_in_bio"]:
+                bio_text = (result["bio"] or "") + " " + (result["link_in_bio"] or "")
+                if "spotify.com" in bio_text.lower():
+                    result["has_spotify_link"] = True
+                    # Try to extract Spotify URL
+                    import re
+                    spotify_match = re.search(r'https?://[^\\s]*spotify\.com/[^\\s]*', bio_text)
+                    if spotify_match:
+                        result["spotify_url"] = spotify_match.group(0)
+                        logger.info(f"🔥 FIRECRAWL DEBUG: Found Spotify URL in bio: {result['spotify_url']}")
+            
+            logger.info(f"🔥 FIRECRAWL DEBUG: Final Instagram result for {artist_profile.name}: {result}")
+            logger.info(f"✅ Instagram profile scraped successfully for {artist_profile.name} - {result['follower_count']} followers")
+            
+            return result
+            
         except Exception as e:
-            logger.error(f"Spotify profile scraping error: {e}")
+            logger.error(f"🔥 FIRECRAWL DEBUG: Instagram scraping failed for {instagram_url}: {e}")
+            logger.error(f"🔥 FIRECRAWL DEBUG: Exception type: {type(e).__name__}")
+            return None
+    
+    async def _scrape_spotify_profile(
+        self,
+        spotify_artist_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Scrape Spotify artist profile page using Firecrawl"""
+        
+        if not self.firecrawl_app:
+            logger.warning("🔥 Firecrawl not available for Spotify profile scraping")
+            return None
+        
+        spotify_url = f"https://open.spotify.com/artist/{spotify_artist_id}"
+        logger.info(f"🔥 FIRECRAWL DEBUG: Starting Spotify profile scrape")
+        logger.info(f"🔥 FIRECRAWL DEBUG: Target URL: {spotify_url}")
+        logger.info(f"🔥 FIRECRAWL DEBUG: Spotify artist ID: {spotify_artist_id}")
+        
+        try:
+            # Define extraction schema for Spotify profile
+            extraction_schema = {
+                "type": "object",
+                "properties": {
+                    "monthly_listeners": {
+                        "type": "string",
+                        "description": "Monthly listeners count (e.g., '1,234,567 monthly listeners')"
+                    },
+                    "bio": {
+                        "type": "string",
+                        "description": "Artist biography or description"
+                    },
+                    "verified": {
+                        "type": "boolean", 
+                        "description": "Whether artist is verified"
+                    },
+                    "top_cities": {
+                        "type": "array",
+                        "description": "List of top cities where artist is popular",
+                        "items": {"type": "string"}
+                    }
+                }
+            }
+            
+            logger.info(f"🔥 FIRECRAWL DEBUG: Using Spotify extraction schema: {extraction_schema}")
+            logger.info(f"🔥 FIRECRAWL DEBUG: Calling Firecrawl scrape for Spotify profile...")
+            
+            # Scrape with structured extraction
+            response = self.firecrawl_app.scrape_url(
+                spotify_url,
+                params={
+                    'formats': ['extract'],
+                    'extract': {
+                        'schema': extraction_schema
+                    },
+                    'timeout': 30000,
+                    'waitFor': 5000  # Wait longer for Spotify to load
+                }
+            )
+            
+            logger.info(f"🔥 FIRECRAWL DEBUG: Spotify raw response received")
+            logger.info(f"🔥 FIRECRAWL DEBUG: Response keys: {list(response.keys()) if response else 'None'}")
+            
+            if not response or 'extract' not in response:
+                logger.warning(f"🔥 FIRECRAWL DEBUG: Invalid Spotify response: {response}")
+                return None
+                
+            extracted_data = response['extract']
+            logger.info(f"🔥 FIRECRAWL DEBUG: Spotify extracted data: {extracted_data}")
+            
+            if not extracted_data:
+                logger.warning(f"🔥 FIRECRAWL DEBUG: No data extracted from Spotify profile")
+                return None
+            
+            # Process extracted data
+            result = {
+                "monthly_listeners": 0,
+                "bio": extracted_data.get("bio"),
+                "verified": extracted_data.get("verified", False),
+                "top_cities": extracted_data.get("top_cities", [])
+            }
+            
+            # Parse monthly listeners
+            listener_str = extracted_data.get("monthly_listeners", "0")
+            logger.info(f"🔥 FIRECRAWL DEBUG: Raw monthly listeners string: '{listener_str}'")
+            
+            if listener_str:
+                result["monthly_listeners"] = self._parse_listener_count(str(listener_str))
+                logger.info(f"🔥 FIRECRAWL DEBUG: Parsed monthly listeners: {result['monthly_listeners']}")
+            
+            logger.info(f"🔥 FIRECRAWL DEBUG: Final Spotify profile result: {result}")
+            logger.info(f"✅ Spotify profile scraped successfully - {result['monthly_listeners']} monthly listeners")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"🔥 FIRECRAWL DEBUG: Spotify profile scraping failed for {spotify_url}: {e}")
+            logger.error(f"🔥 FIRECRAWL DEBUG: Exception type: {type(e).__name__}")
             return None
     
     async def _get_artist_top_songs(
@@ -558,156 +691,291 @@ class EnhancedEnrichmentAgentV2:
         artist_name: str,
         songs: List[Dict[str, str]]
     ) -> Optional[Dict[str, Any]]:
-        """Scrape and analyze lyrics for songs"""
+        """Analyze song lyrics using Firecrawl to scrape from Musixmatch"""
+        
+        if not self.firecrawl_app:
+            logger.warning("🔥 Firecrawl not available for lyrics analysis")
+            return None
         
         if not songs:
+            logger.info(f"🎵 No songs provided for lyrics analysis for {artist_name}")
             return None
+        
+        logger.info(f"🔥 FIRECRAWL DEBUG: Starting lyrics analysis for {artist_name}")
+        logger.info(f"🔥 FIRECRAWL DEBUG: Analyzing {len(songs)} songs: {[s.get('name') for s in songs]}")
         
         all_lyrics = []
-        analyzed_songs = []
+        successful_scrapes = 0
         
         for song in songs:
+            song_name = song.get('name', '')
+            if not song_name:
+                continue
+                
+            # Format Musixmatch URL
+            artist_slug = artist_name.lower().replace(' ', '-').replace('&', 'and')
+            song_slug = song_name.lower().replace(' ', '-').replace('&', 'and')
+            
+            # Clean slugs of special characters
+            import re
+            artist_slug = re.sub(r'[^a-z0-9-]', '', artist_slug)
+            song_slug = re.sub(r'[^a-z0-9-]', '', song_slug)
+            
+            musixmatch_url = f"https://www.musixmatch.com/lyrics/{artist_slug}/{song_slug}"
+            
+            logger.info(f"🔥 FIRECRAWL DEBUG: Scraping lyrics for '{song_name}' by {artist_name}")
+            logger.info(f"🔥 FIRECRAWL DEBUG: Musixmatch URL: {musixmatch_url}")
+            
             try:
-                # Format song and artist names for Musixmatch URL
-                artist_slug = re.sub(r'[^a-z0-9]+', '-', artist_name.lower()).strip('-')
-                song_slug = re.sub(r'[^a-z0-9]+', '-', song["name"].lower()).strip('-')
-                
-                lyrics_url = f"https://www.musixmatch.com/lyrics/{artist_slug}/{song_slug}"
-                
-                if self.firecrawl_app:
-                    # Scrape lyrics
-                    result = self.firecrawl_app.scrape_url(
-                        url=lyrics_url,
-                        params={
-                            'formats': ['markdown'],
-                            'onlyMainContent': True,
-                            'timeout': 20000
+                # Define extraction schema for lyrics
+                lyrics_schema = {
+                    "type": "object",
+                    "properties": {
+                        "lyrics": {
+                            "type": "string",
+                            "description": "Complete song lyrics text"
+                        },
+                        "song_title": {
+                            "type": "string",
+                            "description": "Song title"
+                        },
+                        "artist_name": {
+                            "type": "string", 
+                            "description": "Artist name"
                         }
-                    )
-                    
-                    if result and result.get('success'):
-                        content = result.get('markdown', '')
-                        
-                        # Extract lyrics from content
-                        lyrics = self._extract_lyrics_from_content(content)
-                        if lyrics:
-                            all_lyrics.append(lyrics)
-                            analyzed_songs.append(song["name"])
-                            logger.info(f"✅ Scraped lyrics for {song['name']}")
+                    },
+                    "required": ["lyrics"]
+                }
+                
+                logger.info(f"🔥 FIRECRAWL DEBUG: Using lyrics extraction schema for {song_name}")
+                
+                # Scrape lyrics with Firecrawl
+                response = self.firecrawl_app.scrape_url(
+                    musixmatch_url,
+                    params={
+                        'formats': ['extract', 'markdown'],
+                        'extract': {
+                            'schema': lyrics_schema
+                        },
+                        'timeout': 25000,
+                        'waitFor': 2000
+                    }
+                )
+                
+                logger.info(f"🔥 FIRECRAWL DEBUG: Lyrics response received for {song_name}")
+                logger.info(f"🔥 FIRECRAWL DEBUG: Response keys: {list(response.keys()) if response else 'None'}")
+                
+                if not response:
+                    logger.warning(f"🔥 FIRECRAWL DEBUG: Empty lyrics response for {song_name}")
+                    continue
+                
+                # Try to get lyrics from extract first, then markdown
+                lyrics_text = None
+                
+                if 'extract' in response and response['extract']:
+                    extracted_data = response['extract']
+                    lyrics_text = extracted_data.get('lyrics')
+                    logger.info(f"🔥 FIRECRAWL DEBUG: Extracted lyrics length: {len(lyrics_text) if lyrics_text else 0} chars")
+                
+                # Fallback to markdown if extract didn't work
+                if not lyrics_text and 'markdown' in response:
+                    markdown_content = response['markdown']
+                    lyrics_text = self._extract_lyrics_from_content(markdown_content)
+                    logger.info(f"🔥 FIRECRAWL DEBUG: Markdown fallback lyrics length: {len(lyrics_text) if lyrics_text else 0} chars")
+                
+                if lyrics_text and len(lyrics_text) > 100:  # Minimum viable lyrics length
+                    all_lyrics.append({
+                        'song': song_name,
+                        'lyrics': lyrics_text
+                    })
+                    successful_scrapes += 1
+                    logger.info(f"🔥 FIRECRAWL DEBUG: ✅ Successfully scraped lyrics for '{song_name}' ({len(lyrics_text)} chars)")
+                else:
+                    logger.warning(f"🔥 FIRECRAWL DEBUG: ❌ No viable lyrics found for '{song_name}' (length: {len(lyrics_text) if lyrics_text else 0})")
                 
             except Exception as e:
-                logger.warning(f"Failed to scrape lyrics for {song['name']}: {e}")
+                logger.error(f"🔥 FIRECRAWL DEBUG: Lyrics scraping failed for '{song_name}': {e}")
+                logger.error(f"🔥 FIRECRAWL DEBUG: Exception type: {type(e).__name__}")
                 continue
         
+        logger.info(f"🔥 FIRECRAWL DEBUG: Lyrics scraping summary - {successful_scrapes}/{len(songs)} songs successful")
+        
         if not all_lyrics:
+            logger.warning(f"🔥 FIRECRAWL DEBUG: No lyrics successfully scraped for {artist_name}")
             return None
         
-        # Analyze lyrics with AI
-        if self.ai_agent:
+        # Analyze lyrics with AI if we have the agent
+        if self.ai_agent and all_lyrics:
+            logger.info(f"🔥 FIRECRAWL DEBUG: Starting AI analysis of {len(all_lyrics)} sets of lyrics")
+            
             try:
-                analysis_prompt = f"""
-                Analyze the following lyrics from {artist_name}'s songs ({', '.join(analyzed_songs)}):
+                # Combine all lyrics for analysis
+                combined_lyrics = "\\n\\n".join([f"SONG: {item['song']}\\n{item['lyrics']}" for item in all_lyrics])
                 
-                {' '.join(all_lyrics[:3000])}  # Limit to prevent token overflow
+                logger.info(f"🔥 FIRECRAWL DEBUG: Combined lyrics length: {len(combined_lyrics)} chars")
+                logger.info(f"🔥 FIRECRAWL DEBUG: Calling AI agent for lyrical theme analysis...")
                 
-                Provide:
-                1. Main lyrical themes (list of 3-5 themes)
-                2. Primary theme (single most dominant theme)
-                3. Emotional tone (e.g., melancholic, uplifting, aggressive)
-                4. Subject matter categories (e.g., love, social issues, personal growth)
+                # Use AI agent to analyze themes
+                ai_result = await self.ai_agent.run(
+                    f"Analyze these song lyrics and extract the main lyrical themes, emotional content, and subject matter. "
+                    f"Focus on recurring themes across all songs. Return as JSON with 'themes', 'emotional_tone', and 'subject_matter' fields. "
+                    f"Lyrics:\\n{combined_lyrics[:3000]}"  # Limit to prevent token overflow
+                )
                 
-                Return as JSON with keys: themes, primary_theme, emotional_tone, subject_matter
-                """
+                logger.info(f"🔥 FIRECRAWL DEBUG: AI analysis completed")
+                logger.info(f"🔥 FIRECRAWL DEBUG: AI result type: {type(ai_result.data) if hasattr(ai_result, 'data') else type(ai_result)}")
                 
-                result = await self.ai_agent.run(analysis_prompt)
-                
-                if result and hasattr(result, 'data'):
-                    analysis_data = result.data
-                    if isinstance(analysis_data, str):
-                        # Try to parse JSON from string response
-                        try:
-                            analysis_data = json.loads(analysis_data)
-                        except:
-                            # Fallback to basic analysis
-                            analysis_data = {
-                                "themes": ["music", "life", "emotions"],
-                                "primary_theme": "personal expression",
-                                "emotional_tone": "varied",
-                                "subject_matter": ["personal experiences"]
-                            }
+                # Extract themes from AI response
+                if hasattr(ai_result, 'data') and isinstance(ai_result.data, dict):
+                    ai_data = ai_result.data
+                    logger.info(f"🔥 FIRECRAWL DEBUG: AI analysis data: {ai_data}")
                     
-                    return analysis_data
-                
+                    return {
+                        "themes": ai_data.get("themes", []),
+                        "emotional_tone": ai_data.get("emotional_tone"),
+                        "subject_matter": ai_data.get("subject_matter", []),
+                        "songs_analyzed": len(all_lyrics),
+                        "total_lyrics_length": len(combined_lyrics)
+                    }
+                else:
+                    logger.warning(f"🔥 FIRECRAWL DEBUG: Unexpected AI result format: {ai_result}")
+                    
             except Exception as e:
-                logger.error(f"AI lyrical analysis failed: {e}")
+                logger.error(f"🔥 FIRECRAWL DEBUG: AI lyrics analysis failed: {e}")
+                logger.error(f"🔥 FIRECRAWL DEBUG: Exception type: {type(e).__name__}")
         
-        # Fallback basic analysis
+        # Fallback to basic theme extraction if AI fails
+        logger.info(f"🔥 FIRECRAWL DEBUG: Using fallback basic theme extraction")
+        basic_themes = self._extract_basic_themes([item['lyrics'] for item in all_lyrics])
+        
+        logger.info(f"🔥 FIRECRAWL DEBUG: Basic themes extracted: {basic_themes}")
+        
         return {
-            "themes": self._extract_basic_themes(all_lyrics),
-            "primary_theme": "artistic expression",
-            "emotional_tone": "varied",
-            "subject_matter": ["general"]
+            "themes": basic_themes,
+            "songs_analyzed": len(all_lyrics),
+            "method": "basic_extraction"
         }
     
     async def _extract_contact_from_url(
         self,
         url: str
     ) -> Optional[Dict[str, Any]]:
-        """Extract contact information from a URL (like Linktree)"""
+        """Extract contact information from link-in-bio URLs using Firecrawl"""
         
-        if not self.firecrawl_app:
+        if not self.firecrawl_app or not url:
+            logger.warning("🔥 Firecrawl not available or no URL provided for contact extraction")
             return None
         
+        logger.info(f"🔥 FIRECRAWL DEBUG: Starting contact extraction from link-in-bio")
+        logger.info(f"🔥 FIRECRAWL DEBUG: Target URL: {url}")
+        
         try:
-            result = self.firecrawl_app.scrape_url(
-                url=url,
+            # Define extraction schema for contact information
+            contact_schema = {
+                "type": "object",
+                "properties": {
+                    "email": {
+                        "type": "string",
+                        "description": "Email address for contact (e.g., contact@example.com)"
+                    },
+                    "phone": {
+                        "type": "string",
+                        "description": "Phone number for contact"
+                    },
+                    "booking_email": {
+                        "type": "string",
+                        "description": "Booking or management email address"
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "Location, city, or address mentioned"
+                    },
+                    "website": {
+                        "type": "string",
+                        "description": "Official website URL"
+                    },
+                    "social_links": {
+                        "type": "array",
+                        "description": "List of social media links",
+                        "items": {"type": "string"}
+                    }
+                }
+            }
+            
+            logger.info(f"🔥 FIRECRAWL DEBUG: Using contact extraction schema")
+            logger.info(f"🔥 FIRECRAWL DEBUG: Calling Firecrawl scrape for contact info...")
+            
+            # Scrape contact page with Firecrawl
+            response = self.firecrawl_app.scrape_url(
+                url,
                 params={
-                    'formats': ['markdown'],
-                    'onlyMainContent': True,
-                    'timeout': 20000
+                    'formats': ['extract', 'markdown'],
+                    'extract': {
+                        'schema': contact_schema
+                    },
+                    'timeout': 20000,
+                    'waitFor': 2000
                 }
             )
             
-            if result and result.get('success'):
-                content = result.get('markdown', '')
+            logger.info(f"🔥 FIRECRAWL DEBUG: Contact extraction response received")
+            logger.info(f"🔥 FIRECRAWL DEBUG: Response keys: {list(response.keys()) if response else 'None'}")
+            
+            if not response:
+                logger.warning(f"🔥 FIRECRAWL DEBUG: Empty contact response for {url}")
+                return None
+            
+            contact_info = {}
+            
+            # Try structured extraction first
+            if 'extract' in response and response['extract']:
+                extracted_data = response['extract']
+                logger.info(f"🔥 FIRECRAWL DEBUG: Extracted contact data: {extracted_data}")
                 
-                contact_info = {}
+                contact_info.update({
+                    "email": extracted_data.get("email"),
+                    "phone": extracted_data.get("phone"), 
+                    "booking_email": extracted_data.get("booking_email"),
+                    "location": extracted_data.get("location"),
+                    "website": extracted_data.get("website"),
+                    "social_links": extracted_data.get("social_links", [])
+                })
+            
+            # Fallback to regex parsing from markdown if needed
+            if 'markdown' in response and not any(contact_info.values()):
+                markdown_content = response['markdown']
+                logger.info(f"🔥 FIRECRAWL DEBUG: Fallback to markdown parsing (length: {len(markdown_content)} chars)")
                 
-                # Extract email
-                email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-                emails = re.findall(email_pattern, content)
+                # Extract email addresses using regex
+                import re
+                email_pattern = r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b'
+                emails = re.findall(email_pattern, markdown_content)
+                
                 if emails:
-                    # Prefer booking/management emails
-                    for email in emails:
-                        if any(keyword in email.lower() for keyword in ['booking', 'management', 'contact']):
-                            contact_info['email'] = email
-                            break
-                    if 'email' not in contact_info:
-                        contact_info['email'] = emails[0]
+                    contact_info["email"] = emails[0]  # Take the first email found
+                    logger.info(f"🔥 FIRECRAWL DEBUG: Found email via regex: {emails[0]}")
                 
-                # Extract phone
-                phone_pattern = r'[\+]?[(]?[0-9]{1,3}[)]?[-\s\.]?[(]?[0-9]{1,4}[)]?[-\s\.]?[0-9]{1,4}[-\s\.]?[0-9]{1,9}'
-                phones = re.findall(phone_pattern, content)
+                # Extract phone numbers (basic pattern)
+                phone_pattern = r'\\b(?:\\+?1[-.]?)?(?:\\([0-9]{3}\\)|[0-9]{3})[-.]?[0-9]{3}[-.]?[0-9]{4}\\b'
+                phones = re.findall(phone_pattern, markdown_content)
+                
                 if phones:
-                    contact_info['phone'] = phones[0]
-                
-                # Extract location
-                location_patterns = [
-                    r'(?:based in|located in|from)\s+([A-Z][a-zA-Z\s,]+)',
-                    r'([A-Z][a-zA-Z]+,\s*[A-Z]{2})',  # City, State
-                    r'([A-Z][a-zA-Z]+,\s*[A-Z][a-zA-Z]+)'  # City, Country
-                ]
-                
-                for pattern in location_patterns:
-                    location_match = re.search(pattern, content)
-                    if location_match:
-                        contact_info['location'] = location_match.group(1).strip()
-                        break
-                
-                return contact_info if contact_info else None
+                    contact_info["phone"] = phones[0]
+                    logger.info(f"🔥 FIRECRAWL DEBUG: Found phone via regex: {phones[0]}")
+            
+            # Filter out None/empty values
+            contact_info = {k: v for k, v in contact_info.items() if v}
+            
+            if contact_info:
+                logger.info(f"🔥 FIRECRAWL DEBUG: ✅ Successfully extracted contact info: {contact_info}")
+                return contact_info
+            else:
+                logger.warning(f"🔥 FIRECRAWL DEBUG: ❌ No contact information found at {url}")
+                return None
                 
         except Exception as e:
-            logger.error(f"Contact extraction error: {e}")
+            logger.error(f"🔥 FIRECRAWL DEBUG: Contact extraction failed for {url}: {e}")
+            logger.error(f"🔥 FIRECRAWL DEBUG: Exception type: {type(e).__name__}")
             return None
     
     def _get_best_image_url(self, images: List[Dict[str, Any]]) -> Optional[str]:
