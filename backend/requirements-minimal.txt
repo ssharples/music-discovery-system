@@ -16,7 +16,6 @@ python-dotenv
 sentry-sdk[fastapi]
 google-api-python-client
 spotipy
-firecrawl-py
 tenacity
 aiofiles
 openai
@@ -25,3 +24,4 @@ asyncpg
 python-jose[cryptography]
 passlib[bcrypt]
 email-validator
+firecrawl-py==2.8.0

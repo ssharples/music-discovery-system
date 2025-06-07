@@ -17,6 +17,10 @@ import json
 import re
 import asyncio
 from datetime import datetime
+import os
+import time
+from urllib.parse import urlparse, urljoin
+import requests
 
 from app.core.config import settings
 from app.core.dependencies import PipelineDependencies
@@ -27,10 +31,9 @@ logger = logging.getLogger(__name__)
 
 # Import Firecrawl if available
 try:
-    import sys
     logger.info(f"🔥 FIRECRAWL DEBUG: Python path: {sys.path[:3]}...")
     logger.info(f"🔥 FIRECRAWL DEBUG: Attempting primary firecrawl import...")
-    from firecrawl import FirecrawlApp
+    from firecrawl import FirecrawlApp, JsonConfig
     FIRECRAWL_AVAILABLE = True
     FIRECRAWL_IMPORT_ERROR = None
     logger.info(f"🔥 FIRECRAWL DEBUG: Primary import successful!")
@@ -141,6 +144,8 @@ class EnhancedEnrichmentAgentV2:
                 logger.error(f"🔥 FIRECRAWL DEBUG: Firecrawl library import failed! Please check installation.")
             if not settings.is_firecrawl_configured():
                 logger.error(f"🔥 FIRECRAWL DEBUG: Firecrawl API key not configured! Please set FIRECRAWL_API_KEY environment variable.")
+    
+
     
     @property
     def ai_agent(self) -> Optional[Agent]:
@@ -573,33 +578,32 @@ class EnhancedEnrichmentAgentV2:
             logger.info(f"🔥 FIRECRAWL DEBUG: Using extraction schema: {extraction_schema}")
             logger.info(f"🔥 FIRECRAWL DEBUG: Calling Firecrawl scrape with extract...")
             
-            # Scrape with structured extraction - use correct parameters for v1.5.0
+            # Scrape with structured extraction - use correct parameters for v2.8.0
+            json_config = JsonConfig(
+                extractionSchema=extraction_schema,
+                mode="llm-extraction",
+                pageOptions={"onlyMainContent": True}
+            )
+            
             response = self.firecrawl_app.scrape_url(
                 instagram_url,
-                params={
-                    'extractorOptions': {
-                        'extractionSchema': extraction_schema
-                    },
-                    'pageOptions': {
-                        'waitFor': 3000,
-                        'screenshot': False
-                    },
-                    'timeout': 30000
-                }
+                formats=["json", "markdown"],
+                json_options=json_config
             )
             
             logger.info(f"🔥 FIRECRAWL DEBUG: Raw response received for {instagram_url}")
             logger.info(f"🔥 FIRECRAWL DEBUG: Response keys: {list(response.keys()) if response else 'None'}")
             
-            if not response:
-                logger.warning(f"🔥 FIRECRAWL DEBUG: Empty response from Firecrawl for {instagram_url}")
+            if not response or not response.get('success'):
+                logger.warning(f"🔥 FIRECRAWL DEBUG: Failed response from Firecrawl for {instagram_url}")
                 return None
                 
-            if 'extract' not in response:
-                logger.warning(f"🔥 FIRECRAWL DEBUG: No 'extract' key in response: {response}")
+            data = response.get('data', {})
+            if not data:
+                logger.warning(f"🔥 FIRECRAWL DEBUG: No data in response: {response}")
                 return None
                 
-            extracted_data = response['extract']
+            extracted_data = data.get('json', {})
             logger.info(f"🔥 FIRECRAWL DEBUG: Extracted data: {extracted_data}")
             
             if not extracted_data:
@@ -690,32 +694,27 @@ class EnhancedEnrichmentAgentV2:
             logger.info(f"🔥 FIRECRAWL DEBUG: Using Spotify extraction schema: {extraction_schema}")
             logger.info(f"🔥 FIRECRAWL DEBUG: Calling Firecrawl scrape for Spotify profile...")
             
-            # Use correct API parameters for firecrawl-py v1.5.0
+            # Use correct API parameters for firecrawl-py v2.8.0
+            json_config = JsonConfig(
+                extractionSchema=extraction_schema,
+                mode="llm-extraction",
+                pageOptions={"onlyMainContent": True}
+            )
+            
             response = self.firecrawl_app.scrape_url(
                 spotify_url,
-                params={
-                    'extractorOptions': {
-                        'extractionSchema': extraction_schema
-                    },
-                    'pageOptions': {
-                        'waitFor': 5000,
-                        'screenshot': False
-                    },
-                    'timeout': 30000
-                }
+                formats=["json", "markdown"],
+                json_options=json_config
             )
             
             logger.info(f"🔥 FIRECRAWL DEBUG: Spotify raw response received")
             logger.info(f"🔥 FIRECRAWL DEBUG: Response keys: {list(response.keys()) if response else 'None'}")
             
-            # Check for different response formats based on API version
+            # Check for response data in v2.8.0 format
             extracted_data = None
-            if response and 'extract' in response:
-                extracted_data = response['extract']
-            elif response and 'llm_extraction' in response:
-                extracted_data = response['llm_extraction']
-            elif response and 'data' in response:
-                extracted_data = response['data']
+            if response and response.get('success'):
+                data = response.get('data', {})
+                extracted_data = data.get('json', {})
             
             if not extracted_data:
                 logger.warning(f"🔥 FIRECRAWL DEBUG: No data extracted from Spotify profile - Response: {response}")
@@ -1019,31 +1018,32 @@ class EnhancedEnrichmentAgentV2:
             logger.info(f"🔥 FIRECRAWL DEBUG: Using contact extraction schema")
             logger.info(f"🔥 FIRECRAWL DEBUG: Calling Firecrawl scrape for contact info...")
             
-            # Scrape contact page with Firecrawl
+            # Scrape contact page with Firecrawl v2.8.0
+            json_config = JsonConfig(
+                extractionSchema=contact_schema,
+                mode="llm-extraction",
+                pageOptions={"onlyMainContent": True}
+            )
+            
             response = self.firecrawl_app.scrape_url(
                 url,
-                params={
-                    'formats': ['extract', 'markdown'],
-                    'extract': {
-                        'schema': contact_schema
-                    },
-                    'timeout': 20000,
-                    'waitFor': 2000
-                }
+                formats=["json", "markdown"],
+                json_options=json_config
             )
             
             logger.info(f"🔥 FIRECRAWL DEBUG: Contact extraction response received")
             logger.info(f"🔥 FIRECRAWL DEBUG: Response keys: {list(response.keys()) if response else 'None'}")
             
-            if not response:
-                logger.warning(f"🔥 FIRECRAWL DEBUG: Empty contact response for {url}")
+            if not response or not response.get('success'):
+                logger.warning(f"🔥 FIRECRAWL DEBUG: Failed contact response for {url}")
                 return None
             
             contact_info = {}
+            data = response.get('data', {})
             
             # Try structured extraction first
-            if 'extract' in response and response['extract']:
-                extracted_data = response['extract']
+            extracted_data = data.get('json', {})
+            if extracted_data:
                 logger.info(f"🔥 FIRECRAWL DEBUG: Extracted contact data: {extracted_data}")
                 
                 contact_info.update({
@@ -1056,8 +1056,8 @@ class EnhancedEnrichmentAgentV2:
                 })
             
             # Fallback to regex parsing from markdown if needed
-            if 'markdown' in response and not any(contact_info.values()):
-                markdown_content = response['markdown']
+            markdown_content = data.get('markdown', '')
+            if markdown_content and not any(contact_info.values()):
                 logger.info(f"🔥 FIRECRAWL DEBUG: Fallback to markdown parsing (length: {len(markdown_content)} chars)")
                 
                 # Extract email addresses using regex
@@ -1271,16 +1271,10 @@ class EnhancedEnrichmentAgentV2:
                 try:
                     logger.info(f"🔍 SEARCH API: Searching for '{query}'")
                     
-                    # Use simplified search parameters for firecrawl-py v1.5.0
+                    # Use correct parameters for firecrawl-py v2.8.0
                     search_result = self.firecrawl_app.search(
                         query=query,
-                        pageOptions={
-                            'fetchPageContent': True,
-                            'includeHtml': False
-                        },
-                        searchOptions={
-                            'limit': 3  # Reduced to avoid rate limits
-                        }
+                        limit=3  # Direct parameter for v2.8.0
                     )
                     
                     if search_result and search_result.get("success") and search_result.get("data"):
@@ -1369,7 +1363,7 @@ class EnhancedEnrichmentAgentV2:
         """Extract username from social media URL"""
         if not url:
             return None
-        
+
         # Instagram URL patterns
         if "instagram.com" in url:
             import re
