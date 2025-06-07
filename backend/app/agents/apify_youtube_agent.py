@@ -255,10 +255,10 @@ class ApifyYouTubeAgent:
             actor_input = {
                 "startUrls": channel_urls,
                 "maxItems": max_videos_per_channel * len(channel_urls),
-                "uploadDate": "t",
+                "uploadDate": "w",
                 "duration": "all", 
                 "features": "all",
-                "sort": "r",
+                "sort": "u",
                 "gl": "us",
                 "hl": "en"
             }

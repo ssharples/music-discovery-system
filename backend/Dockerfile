@@ -23,6 +23,13 @@ RUN pip install --no-cache-dir --upgrade pip \
     && echo "📦 Installing requirements..." \
     && pip install --no-cache-dir -r requirements.txt \
     && echo "🔍 Verifying firecrawl installation..." \
+    && echo "📋 Checking pip list for firecrawl..." \
+    && pip list | grep -i firecrawl \
+    && echo "🔍 Attempting manual firecrawl-py install..." \
+    && pip install --no-cache-dir firecrawl-py==1.5.0 --force-reinstall \
+    && echo "📋 Checking pip list again..." \
+    && pip list | grep -i firecrawl \
+    && echo "🐍 Testing Python import..." \
     && python -c "import firecrawl; print('✅ Firecrawl imported successfully'); print(f'Firecrawl version: {firecrawl.__version__ if hasattr(firecrawl, \"__version__\") else \"unknown\"}')" \
     && echo "✅ All dependencies installed successfully"
 

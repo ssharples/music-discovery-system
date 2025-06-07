@@ -57,6 +57,14 @@ except ImportError as e:
             installed_packages = [d.project_name for d in pkg_resources.working_set]
             firecrawl_packages = [pkg for pkg in installed_packages if 'firecrawl' in pkg.lower()]
             logger.info(f"🔥 FIRECRAWL DEBUG: Found firecrawl packages: {firecrawl_packages}")
+            
+            # Also check pip list directly
+            import subprocess
+            result = subprocess.run(['pip', 'list'], capture_output=True, text=True)
+            pip_output = result.stdout
+            firecrawl_lines = [line for line in pip_output.split('\n') if 'firecrawl' in line.lower()]
+            logger.info(f"🔥 FIRECRAWL DEBUG: Pip list firecrawl results: {firecrawl_lines}")
+            
         except Exception as pkg_e:
             logger.info(f"🔥 FIRECRAWL DEBUG: Error checking packages: {pkg_e}")
 except Exception as e:
