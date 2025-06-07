@@ -161,6 +161,8 @@ class StorageAgent:
                 genres=artist_data.get('genres', []),
                 location=artist_data.get('location'),
                 bio=artist_data.get('bio'),
+                avatar_url=artist_data.get('avatar_url'),  # New field
+                lyrical_themes=artist_data.get('lyrical_themes', []),  # New field
                 follower_counts=artist_data.get('follower_counts', {}),
                 social_links=artist_data.get('social_links', {}),
                 metadata=artist_data.get('metadata', {}),
@@ -383,6 +385,8 @@ class StorageAgent:
                 "genres": artist.genres[:10] if artist.genres else [],  # Limit genres to prevent large arrays
                 "location": artist.location,
                 "bio": artist.bio[:2000] if artist.bio else None,  # Limit bio length
+                "avatar_url": artist.avatar_url,  # New field
+                "lyrical_themes": artist.lyrical_themes[:10] if artist.lyrical_themes else [],  # New field
                 "follower_counts": sanitized_follower_counts,
                 "social_links": sanitized_social_links,
                 "metadata": sanitized_metadata,

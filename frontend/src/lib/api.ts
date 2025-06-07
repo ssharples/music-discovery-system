@@ -20,6 +20,8 @@ export interface Artist {
   genres: string[];
   location?: string;
   bio?: string;
+  avatar_url?: string;  // New field
+  lyrical_themes?: string[];  // New field
   follower_counts: Record<string, number>;
   social_links: Record<string, string>;
   metadata: Record<string, any>;

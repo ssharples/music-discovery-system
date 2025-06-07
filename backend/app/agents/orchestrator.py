@@ -19,6 +19,7 @@ from app.models.artist import (
 )
 from app.agents.apify_youtube_agent import ApifyYouTubeAgent
 from app.agents.enhanced_enrichment_agent_simple import get_simple_enhanced_enrichment_agent
+from app.agents.enhanced_enrichment_agent_v2 import get_enhanced_enrichment_agent_v2
 from app.agents.lyrics_agent import get_lyrics_agent
 from app.agents.storage_agent import StorageAgent
 from app.agents.ai_detection_agent import get_ai_detection_agent
@@ -58,14 +59,16 @@ def create_orchestrator_agent():
 class DiscoveryOrchestrator:
     """Main orchestrator for the discovery pipeline with intelligent coordination"""
     
-    def __init__(self):
+    def __init__(self, use_v2_enrichment: bool = True):
         self.youtube_agent = ApifyYouTubeAgent()
         self._enrichment_agent = None
+        self._enrichment_agent_v2 = None
         self._lyrics_agent = None
         self._ai_detection_agent = None
         self.storage_agent = StorageAgent()
         self._orchestrator_agent = None
         self._agent_creation_attempted = False
+        self.use_v2_enrichment = use_v2_enrichment
         # Use global quota_manager from app.core.quota_manager
         self.quota_manager = quota_manager
         self._processed_artists = set()  # Deduplication cache
@@ -74,7 +77,7 @@ class DiscoveryOrchestrator:
         self._active_sessions = {}  # session_id -> control flags
         self._session_states = {}  # session_id -> current state info
         
-        logger.info("✅ Orchestrator initialized with lazy agent loading")
+        logger.info(f"✅ Orchestrator initialized with lazy agent loading (V2 enrichment: {use_v2_enrichment})")
     
     @property
     def orchestrator_agent(self):
@@ -87,14 +90,26 @@ class DiscoveryOrchestrator:
     @property
     def enrichment_agent(self):
         """Lazy initialization of enrichment agent"""
-        if self._enrichment_agent is None:
-            try:
-                self._enrichment_agent = get_simple_enhanced_enrichment_agent()
-                logger.info("✅ Enhanced enrichment agent initialized successfully")
-            except Exception as e:
-                logger.error(f"❌ Failed to initialize enhanced enrichment agent: {e}")
-                self._enrichment_agent = None
-        return self._enrichment_agent
+        if self.use_v2_enrichment:
+            # Use V2 enrichment agent
+            if self._enrichment_agent_v2 is None:
+                try:
+                    self._enrichment_agent_v2 = get_enhanced_enrichment_agent_v2()
+                    logger.info("✅ Enhanced enrichment agent V2 initialized successfully")
+                except Exception as e:
+                    logger.error(f"❌ Failed to initialize enhanced enrichment agent V2: {e}")
+                    self._enrichment_agent_v2 = None
+            return self._enrichment_agent_v2
+        else:
+            # Use simple enrichment agent
+            if self._enrichment_agent is None:
+                try:
+                    self._enrichment_agent = get_simple_enhanced_enrichment_agent()
+                    logger.info("✅ Enhanced enrichment agent (simple) initialized successfully")
+                except Exception as e:
+                    logger.error(f"❌ Failed to initialize enhanced enrichment agent: {e}")
+                    self._enrichment_agent = None
+            return self._enrichment_agent
         
     @property
     def lyrics_agent(self):
@@ -765,22 +780,37 @@ class DiscoveryOrchestrator:
                 
                 # Use enrichment agent if available
                 if self.enrichment_agent:
-                    enrichment_result = await self.enrichment_agent.enrich_artist_basic(
-                        profile, deps
-                    )
-                    
-                    if enrichment_result.get("success"):
-                        # Update profile with enrichment data
-                        original_score = profile.enrichment_score
-                        profile.enrichment_score = enrichment_result.get("enrichment_score", 0.0)
-                        profile.metadata.update({
-                            "enrichment_data": enrichment_result,
-                            "enhanced_agent_used": True
-                        })
-                        logger.info(f"✅ Enhanced enrichment successful for {profile.name} (score: {profile.enrichment_score:.2f})")
-                        return profile
+                    if self.use_v2_enrichment:
+                        # V2 enrichment agent with comprehensive features
+                        enrichment_result = await self.enrichment_agent.enrich_artist_comprehensive(
+                            profile, deps
+                        )
+                        
+                        if enrichment_result.get("success"):
+                            # V2 returns enriched profile directly
+                            enriched_profile = enrichment_result.get("enriched_profile", profile)
+                            logger.info(f"✅ Enhanced enrichment V2 successful for {profile.name} (score: {enriched_profile.enrichment_score:.2f})")
+                            return enriched_profile
+                        else:
+                            logger.warning(f"⚠️ Enhanced enrichment V2 failed for {profile.name}")
                     else:
-                        logger.warning(f"⚠️ Enhanced enrichment failed for {profile.name}")
+                        # Simple enrichment agent
+                        enrichment_result = await self.enrichment_agent.enrich_artist_basic(
+                            profile, deps
+                        )
+                        
+                        if enrichment_result.get("success"):
+                            # Update profile with enrichment data
+                            original_score = profile.enrichment_score
+                            profile.enrichment_score = enrichment_result.get("enrichment_score", 0.0)
+                            profile.metadata.update({
+                                "enrichment_data": enrichment_result,
+                                "enhanced_agent_used": True
+                            })
+                            logger.info(f"✅ Enhanced enrichment successful for {profile.name} (score: {profile.enrichment_score:.2f})")
+                            return profile
+                        else:
+                            logger.warning(f"⚠️ Enhanced enrichment failed for {profile.name}")
                 else:
                     logger.warning(f"⚠️ Enrichment agent not available for {profile.name}")
                 

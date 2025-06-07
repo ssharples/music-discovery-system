@@ -15,6 +15,9 @@ from app.agents.youtube_agent import YouTubeDiscoveryAgent
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Global flag to control enrichment version
+USE_V2_ENRICHMENT = True
+
 @router.post("/discover", response_model=DiscoveryResponse)
 async def start_discovery(
     request: DiscoveryRequest,
@@ -29,8 +32,8 @@ async def start_discovery(
     
     try:
         logger.info("⚡ About to create DiscoveryOrchestrator instance...")
-        orchestrator = DiscoveryOrchestrator()
-        logger.info("✅ DiscoveryOrchestrator created successfully")
+        orchestrator = DiscoveryOrchestrator(use_v2_enrichment=USE_V2_ENRICHMENT)
+        logger.info(f"✅ DiscoveryOrchestrator created successfully (V2 enrichment: {USE_V2_ENRICHMENT})")
         
         logger.info("⚡ About to start discovery session...")
         session_id = await orchestrator.start_discovery_session(
@@ -64,7 +67,7 @@ async def discover_undiscovered_talent(
     logger.info(f"🎯 Undiscovered talent discovery request: max_results={max_results}")
     
     try:
-        orchestrator = DiscoveryOrchestrator()
+        orchestrator = DiscoveryOrchestrator(use_v2_enrichment=USE_V2_ENRICHMENT)
         result = await orchestrator.discover_undiscovered_talent(
             deps=deps,
             max_results=max_results
@@ -222,7 +225,7 @@ async def pause_discovery_session(
     """Pause a running discovery session"""
     try:
         from app.agents.orchestrator import DiscoveryOrchestrator
-        orchestrator = DiscoveryOrchestrator()
+        orchestrator = DiscoveryOrchestrator(use_v2_enrichment=USE_V2_ENRICHMENT)
         result = await orchestrator.pause_session(str(session_id), deps)
         return result
     except Exception as e:
@@ -237,7 +240,7 @@ async def resume_discovery_session(
     """Resume a paused discovery session"""
     try:
         from app.agents.orchestrator import DiscoveryOrchestrator
-        orchestrator = DiscoveryOrchestrator()
+        orchestrator = DiscoveryOrchestrator(use_v2_enrichment=USE_V2_ENRICHMENT)
         result = await orchestrator.resume_session(str(session_id), deps)
         return result
     except Exception as e:
@@ -252,7 +255,7 @@ async def stop_discovery_session(
     """Stop a running discovery session"""
     try:
         from app.agents.orchestrator import DiscoveryOrchestrator
-        orchestrator = DiscoveryOrchestrator()
+        orchestrator = DiscoveryOrchestrator(use_v2_enrichment=USE_V2_ENRICHMENT)
         result = await orchestrator.stop_session(str(session_id), deps)
         return result
     except Exception as e:
@@ -266,7 +269,7 @@ async def get_session_status(
     """Get current status of a discovery session"""
     try:
         from app.agents.orchestrator import DiscoveryOrchestrator
-        orchestrator = DiscoveryOrchestrator()
+        orchestrator = DiscoveryOrchestrator(use_v2_enrichment=USE_V2_ENRICHMENT)
         result = await orchestrator.get_session_status(str(session_id))
         return result
     except Exception as e:
@@ -334,8 +337,8 @@ async def test_discovery(
         
         # Test 1: Basic orchestrator creation
         try:
-            orchestrator = DiscoveryOrchestrator()
-            results["orchestrator_creation"] = "success"
+            orchestrator = DiscoveryOrchestrator(use_v2_enrichment=USE_V2_ENRICHMENT)
+            results["orchestrator_creation"] = f"success (V2 enrichment: {USE_V2_ENRICHMENT})"
         except Exception as e:
             results["orchestrator_creation"] = f"failed: {e}"
             return results

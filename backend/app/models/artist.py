@@ -16,6 +16,8 @@ class ArtistProfile(BaseModel):
     genres: List[str] = Field(default_factory=list)
     location: Optional[str] = None
     bio: Optional[str] = None
+    avatar_url: Optional[str] = None  # New field for artist avatar
+    lyrical_themes: List[str] = Field(default_factory=list)  # New field for lyrical themes
     follower_counts: Dict[str, int] = Field(default_factory=dict)
     social_links: Dict[str, str] = Field(default_factory=dict)
     metadata: Dict[str, Any] = Field(default_factory=dict)
