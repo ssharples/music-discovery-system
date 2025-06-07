@@ -218,6 +218,8 @@ class EnhancedEnrichmentAgentV2:
             if artist_profile.instagram_handle or self._find_instagram_handle(artist_profile):
                 if self.firecrawl_app:
                     enrichment_result["firecrawl_operations"].append("instagram_profile")
+                    # Add delay to avoid rate limiting
+                    await asyncio.sleep(2)
                     instagram_data = await self._scrape_instagram_profile(artist_profile)
                     if instagram_data:
                         enrichment_result["data"]["instagram"] = instagram_data
@@ -256,6 +258,8 @@ class EnhancedEnrichmentAgentV2:
             logger.info(f"🔥 FIRECRAWL DEBUG: STEP 3 - Spotify profile Firecrawl scraping")
             if artist_profile.spotify_id and self.firecrawl_app:
                 enrichment_result["firecrawl_operations"].append("spotify_profile")
+                # Add delay to avoid rate limiting
+                await asyncio.sleep(2)
                 spotify_profile_data = await self._scrape_spotify_profile(artist_profile.spotify_id)
                 if spotify_profile_data:
                     enrichment_result["data"]["spotify_profile"] = spotify_profile_data
@@ -284,6 +288,8 @@ class EnhancedEnrichmentAgentV2:
                 
                 if top_songs and self.firecrawl_app:
                     enrichment_result["firecrawl_operations"].append("lyrics_scraping")
+                    # Add delay to avoid rate limiting
+                    await asyncio.sleep(3)
                     lyrical_themes = await self._analyze_song_lyrics(artist_profile.name, top_songs[:3])
                     if lyrical_themes:
                         enrichment_result["data"]["lyrical_analysis"] = lyrical_themes
@@ -304,34 +310,40 @@ class EnhancedEnrichmentAgentV2:
             else:
                 logger.info(f"🔥 FIRECRAWL DEBUG: No Spotify ID available for lyrics analysis")
             
-            # Enhanced Step 3: Web Presence Search (NEW)
-            logger.info(f"🔥 FIRECRAWL DEBUG: STEP 3 - Web presence search")
-            search_results = await self._search_artist_web_presence(artist_profile.name)
-            enrichment_result["firecrawl_operations"].append(f"web_search: {len(search_results)} queries")
-            
-            # Extract additional contact info from search results
-            if search_results:
-                search_contact_info = await self._extract_contact_from_search_results(search_results)
+            # Enhanced Step 5: Web Presence Search (with rate limiting)
+            logger.info(f"🔥 FIRECRAWL DEBUG: STEP 5 - Web presence search")
+            if self.firecrawl_app:
+                # Add delay to avoid rate limiting  
+                await asyncio.sleep(3)
+                search_results = await self._search_artist_web_presence(artist_profile.name)
+                enrichment_result["firecrawl_operations"].append(f"web_search: {len(search_results)} queries")
                 
-                # Merge with existing contact info
-                if search_contact_info["emails"]:
-                    artist_profile.email = search_contact_info["emails"][0]
-                    logger.info(f"🔥 FIRECRAWL DEBUG: Found email via search: {search_contact_info['emails'][0]}")
-                
-                if search_contact_info["social_media"]:
-                    for platform, url in search_contact_info["social_media"].items():
-                        if platform == "instagram":
-                            artist_profile.instagram_handle = self._extract_username_from_url(url)
-                            logger.info(f"🔗 Using Instagram handle from search: {artist_profile.instagram_handle}")
-                        else:
-                            logger.info(f"🔥 FIRECRAWL DEBUG: Found social media link from search: {platform} - {url}")
-                
-                if search_contact_info["booking_info"]:
-                    if "booking" not in artist_profile.metadata:
-                        artist_profile.metadata["booking"] = []
-                    artist_profile.metadata["booking"].extend(search_contact_info["booking_info"])
-                
-                logger.info(f"🔍 SEARCH API: Enhanced contact info with {len(search_contact_info['emails'])} emails, {len(search_contact_info['social_media'])} social links")
+                # Extract additional contact info from search results
+                if search_results:
+                    search_contact_info = await self._extract_contact_from_search_results(search_results)
+                    
+                    # Merge with existing contact info
+                    if search_contact_info["emails"]:
+                        artist_profile.email = search_contact_info["emails"][0]
+                        logger.info(f"🔥 FIRECRAWL DEBUG: Found email via search: {search_contact_info['emails'][0]}")
+                    
+                    if search_contact_info["social_media"]:
+                        for platform, url in search_contact_info["social_media"].items():
+                            if platform == "instagram":
+                                artist_profile.instagram_handle = self._extract_username_from_url(url)
+                                logger.info(f"🔗 Using Instagram handle from search: {artist_profile.instagram_handle}")
+                            else:
+                                logger.info(f"🔥 FIRECRAWL DEBUG: Found social media link from search: {platform} - {url}")
+                    
+                    if search_contact_info["booking_info"]:
+                        if "booking" not in artist_profile.metadata:
+                            artist_profile.metadata["booking"] = []
+                        artist_profile.metadata["booking"].extend(search_contact_info["booking_info"])
+                    
+                    logger.info(f"🔍 SEARCH API: Enhanced contact info with {len(search_contact_info['emails'])} emails, {len(search_contact_info['social_media'])} social links")
+            else:
+                search_results = {}
+                enrichment_result["firecrawl_operations"].append("web_search: 0 queries")
             
             # Calculate enhanced enrichment score
             artist_profile.enrichment_score = self._calculate_comprehensive_score(
@@ -561,16 +573,18 @@ class EnhancedEnrichmentAgentV2:
             logger.info(f"🔥 FIRECRAWL DEBUG: Using extraction schema: {extraction_schema}")
             logger.info(f"🔥 FIRECRAWL DEBUG: Calling Firecrawl scrape with extract...")
             
-            # Scrape with structured extraction
+            # Scrape with structured extraction - use correct parameters for v1.5.0
             response = self.firecrawl_app.scrape_url(
                 instagram_url,
                 params={
-                    'formats': ['extract'],
-                    'extract': {
-                        'schema': extraction_schema
+                    'extractorOptions': {
+                        'extractionSchema': extraction_schema
                     },
-                    'timeout': 30000,
-                    'waitFor': 3000
+                    'pageOptions': {
+                        'waitFor': 3000,
+                        'screenshot': False
+                    },
+                    'timeout': 30000
                 }
             )
             
@@ -676,32 +690,38 @@ class EnhancedEnrichmentAgentV2:
             logger.info(f"🔥 FIRECRAWL DEBUG: Using Spotify extraction schema: {extraction_schema}")
             logger.info(f"🔥 FIRECRAWL DEBUG: Calling Firecrawl scrape for Spotify profile...")
             
-            # Scrape with structured extraction
+            # Use correct API parameters for firecrawl-py v1.5.0
             response = self.firecrawl_app.scrape_url(
                 spotify_url,
                 params={
-                    'formats': ['extract'],
-                    'extract': {
-                        'schema': extraction_schema
+                    'extractorOptions': {
+                        'extractionSchema': extraction_schema
                     },
-                    'timeout': 30000,
-                    'waitFor': 5000  # Wait longer for Spotify to load
+                    'pageOptions': {
+                        'waitFor': 5000,
+                        'screenshot': False
+                    },
+                    'timeout': 30000
                 }
             )
             
             logger.info(f"🔥 FIRECRAWL DEBUG: Spotify raw response received")
             logger.info(f"🔥 FIRECRAWL DEBUG: Response keys: {list(response.keys()) if response else 'None'}")
             
-            if not response or 'extract' not in response:
-                logger.warning(f"🔥 FIRECRAWL DEBUG: Invalid Spotify response: {response}")
-                return None
-                
-            extracted_data = response['extract']
-            logger.info(f"🔥 FIRECRAWL DEBUG: Spotify extracted data: {extracted_data}")
+            # Check for different response formats based on API version
+            extracted_data = None
+            if response and 'extract' in response:
+                extracted_data = response['extract']
+            elif response and 'llm_extraction' in response:
+                extracted_data = response['llm_extraction']
+            elif response and 'data' in response:
+                extracted_data = response['data']
             
             if not extracted_data:
-                logger.warning(f"🔥 FIRECRAWL DEBUG: No data extracted from Spotify profile")
+                logger.warning(f"🔥 FIRECRAWL DEBUG: No data extracted from Spotify profile - Response: {response}")
                 return None
+            
+            logger.info(f"🔥 FIRECRAWL DEBUG: Spotify extracted data: {extracted_data}")
             
             # Process extracted data
             result = {
@@ -727,6 +747,9 @@ class EnhancedEnrichmentAgentV2:
         except Exception as e:
             logger.error(f"🔥 FIRECRAWL DEBUG: Spotify profile scraping failed for {spotify_url}: {e}")
             logger.error(f"🔥 FIRECRAWL DEBUG: Exception type: {type(e).__name__}")
+            # Check if rate limited
+            if "429" in str(e) or "rate limit" in str(e).lower():
+                logger.warning(f"🔥 FIRECRAWL DEBUG: Rate limited - will retry later")
             return None
     
     async def _get_artist_top_songs(
@@ -1248,22 +1271,39 @@ class EnhancedEnrichmentAgentV2:
                 try:
                     logger.info(f"🔍 SEARCH API: Searching for '{query}'")
                     
-                    # Use Firecrawl Search API with optimized parameters
+                    # Use simplified search parameters for firecrawl-py v1.5.0
                     search_result = self.firecrawl_app.search(
                         query=query,
-                        limit=5,  # Top 5 results per query
-                        country="us",  # Can be configurable
-                        language="en",
-                        time_range="month",  # Recent results for better relevance
-                        formats=["markdown", "links"]  # Get both content and URLs
+                        pageOptions={
+                            'fetchPageContent': True,
+                            'includeHtml': False
+                        },
+                        searchOptions={
+                            'limit': 3  # Reduced to avoid rate limits
+                        }
                     )
                     
-                    if search_result.get("success") and search_result.get("data"):
+                    if search_result and search_result.get("success") and search_result.get("data"):
                         search_results[query] = search_result["data"]
                         logger.info(f"🔍 SEARCH API: Found {len(search_result['data'])} results for '{query}'")
                     
                 except Exception as e:
-                    logger.error(f"🔍 SEARCH API: Failed to search for '{query}': {str(e)}")
+                    error_msg = str(e)
+                    if "unsupported parameter" in error_msg.lower() or "unrecognized" in error_msg.lower():
+                        logger.error(f"🔍 SEARCH API: API parameter error for '{query}': {error_msg}")
+                        # Try basic search without extra parameters
+                        try:
+                            search_result = self.firecrawl_app.search(query, limit=3)
+                            if search_result and search_result.get("data"):
+                                search_results[query] = search_result["data"]
+                                logger.info(f"🔍 SEARCH API: Basic search successful for '{query}'")
+                        except Exception as e2:
+                            logger.error(f"🔍 SEARCH API: Basic search also failed for '{query}': {str(e2)}")
+                    elif "429" in error_msg or "rate limit" in error_msg.lower():
+                        logger.warning(f"🔍 SEARCH API: Rate limited on query '{query}' - stopping search")
+                        break  # Stop on rate limit
+                    else:
+                        logger.error(f"🔍 SEARCH API: Failed to search for '{query}': {error_msg}")
                     continue
             
             return search_results
@@ -1324,6 +1364,25 @@ class EnhancedEnrichmentAgentV2:
         except Exception as e:
             logger.error(f"🔍 SEARCH API: Failed to extract enrichment data: {str(e)}")
             return contact_info
+
+    def _extract_username_from_url(self, url: str) -> Optional[str]:
+        """Extract username from social media URL"""
+        if not url:
+            return None
+        
+        # Instagram URL patterns
+        if "instagram.com" in url:
+            import re
+            match = re.search(r'instagram\.com/([^/?]+)', url)
+            return match.group(1) if match else None
+        
+        # Twitter URL patterns
+        if "twitter.com" in url or "x.com" in url:
+            import re
+            match = re.search(r'(?:twitter|x)\.com/([^/?]+)', url)
+            return match.group(1) if match else None
+        
+        return None
 
 def get_enhanced_enrichment_agent_v2() -> EnhancedEnrichmentAgentV2:
     """Factory function to get enhanced enrichment agent instance"""
