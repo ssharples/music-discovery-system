@@ -22,6 +22,9 @@ from app.core.config import settings
 from app.core.dependencies import PipelineDependencies
 from app.models.artist import ArtistProfile, LyricAnalysis
 
+# Initialize logger first
+logger = logging.getLogger(__name__)
+
 # Import Firecrawl if available
 try:
     import sys
@@ -60,8 +63,6 @@ except Exception as e:
     logger.error(f"🔥 FIRECRAWL DEBUG: Unexpected error during import: {str(e)}")
     FIRECRAWL_AVAILABLE = False
     FIRECRAWL_IMPORT_ERROR = f"Unexpected: {str(e)}"
-
-logger = logging.getLogger(__name__)
 
 class SpotifyArtistData(BaseModel):
     """Spotify artist data structure"""
