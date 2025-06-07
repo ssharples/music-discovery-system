@@ -147,7 +147,7 @@ class ApifyYouTubeAgent:
     async def search_music_content(self, 
                            keywords: List[str], 
                            max_results: int = 50,
-                           upload_date: str = "t",
+                           upload_date: str = "w",
                            duration: str = "all",
                            sort_by: str = "relevance") -> List[Dict[str, Any]]:
         """
