@@ -1189,18 +1189,18 @@ class EnhancedEnrichmentAgentV2:
 
     async def _search_artist_web_presence(self, artist_name: str) -> Dict[str, Any]:
         """
-        NEW: Use Firecrawl Search API to discover artist's web presence across the internet
+        Use Firecrawl Search API to discover artist's web presence for ENRICHMENT ONLY
         """
-        logger.info(f"🔍 SEARCH API: Starting comprehensive web search for {artist_name}")
+        logger.info(f"🔍 SEARCH API: Starting web presence enrichment for {artist_name}")
         
         if not self.firecrawl_app:
-            logger.warning("🔍 SEARCH API: Firecrawl not available, skipping web search")
+            logger.warning("🔍 SEARCH API: Firecrawl not available, skipping web search enrichment")
             return {}
         
         search_results = {}
         
         try:
-            # Search for official websites and social media
+            # Search for official websites and social media for enrichment
             search_queries = [
                 f'"{artist_name}" official website',
                 f'"{artist_name}" instagram',
@@ -1236,12 +1236,12 @@ class EnhancedEnrichmentAgentV2:
             return search_results
             
         except Exception as e:
-            logger.error(f"🔍 SEARCH API: Web search failed for {artist_name}: {str(e)}")
+            logger.error(f"🔍 SEARCH API: Web enrichment search failed for {artist_name}: {str(e)}")
             return {}
 
     async def _extract_contact_from_search_results(self, search_results: Dict[str, Any]) -> Dict[str, Any]:
         """
-        NEW: Extract contact information from search results using AI
+        Extract contact information from search results for ENRICHMENT ONLY
         """
         contact_info = {
             "emails": [],
@@ -1285,97 +1285,12 @@ class EnhancedEnrichmentAgentV2:
             # Remove duplicates
             contact_info["emails"] = list(set(contact_info["emails"]))
             
-            logger.info(f"🔍 SEARCH API: Extracted contact info - Emails: {len(contact_info['emails'])}, Social: {len(contact_info['social_media'])}")
+            logger.info(f"🔍 SEARCH API: Extracted enrichment data - Emails: {len(contact_info['emails'])}, Social: {len(contact_info['social_media'])}")
             return contact_info
             
         except Exception as e:
-            logger.error(f"🔍 SEARCH API: Failed to extract contact info: {str(e)}")
+            logger.error(f"🔍 SEARCH API: Failed to extract enrichment data: {str(e)}")
             return contact_info
-
-    async def _discover_emerging_talent_via_search(self, genre_keywords: List[str]) -> List[Dict[str, Any]]:
-        """
-        NEW: Discover emerging artists using targeted search queries
-        """
-        logger.info(f"🔍 SEARCH API: Discovering emerging talent for genres: {genre_keywords}")
-        
-        if not self.firecrawl_app:
-            return []
-        
-        discovered_artists = []
-        
-        try:
-            # Create search queries for emerging talent discovery
-            search_queries = []
-            for genre in genre_keywords:
-                search_queries.extend([
-                    f'"{genre}" emerging artist 2024',
-                    f'new "{genre}" musicians unsigned',
-                    f'independent "{genre}" artist discovery',
-                    f'"{genre}" artist under 10k followers',
-                    f'"{genre}" music blog new talent'
-                ])
-            
-            for query in search_queries:
-                try:
-                    search_result = self.firecrawl_app.search(
-                        query=query,
-                        limit=10,
-                        time_range="week",  # Very recent for emerging talent
-                        country="us",
-                        language="en",
-                        formats=["markdown", "links"]
-                    )
-                    
-                    if search_result.get("success") and search_result.get("data"):
-                        # Process results to extract artist names and details
-                        for result in search_result["data"]:
-                            content = result.get("markdown", "")
-                            url = result.get("url", "")
-                            
-                            # Extract potential artist names and info
-                            artist_data = self._extract_artist_from_content(content, url)
-                            if artist_data:
-                                discovered_artists.append(artist_data)
-                
-                except Exception as e:
-                    logger.error(f"🔍 SEARCH API: Failed emerging talent search for '{query}': {str(e)}")
-                    continue
-            
-            logger.info(f"🔍 SEARCH API: Discovered {len(discovered_artists)} potential emerging artists")
-            return discovered_artists[:50]  # Limit results
-            
-        except Exception as e:
-            logger.error(f"🔍 SEARCH API: Emerging talent discovery failed: {str(e)}")
-            return []
-
-    def _extract_artist_from_content(self, content: str, url: str) -> Optional[Dict[str, Any]]:
-        """
-        Extract artist information from search result content
-        """
-        # This would use AI to extract structured artist data
-        # For now, simple implementation
-        import re
-        
-        # Look for artist patterns in content
-        artist_patterns = [
-            r'artist[:\s]+([A-Za-z0-9\s]+)',
-            r'musician[:\s]+([A-Za-z0-9\s]+)',
-            r'singer[:\s]+([A-Za-z0-9\s]+)'
-        ]
-        
-        for pattern in artist_patterns:
-            matches = re.findall(pattern, content, re.IGNORECASE)
-            if matches:
-                artist_name = matches[0].strip()
-                if len(artist_name) > 2 and len(artist_name) < 50:
-                    return {
-                        "name": artist_name,
-                        "source_url": url,
-                        "discovery_context": content[:200],
-                        "discovery_method": "search_api"
-                    }
-        
-        return None
 
 def get_enhanced_enrichment_agent_v2() -> EnhancedEnrichmentAgentV2:
     """Factory function to get enhanced enrichment agent instance"""

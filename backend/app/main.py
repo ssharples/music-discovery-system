@@ -1,14 +1,11 @@
 # backend/app/main.py
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Body
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from contextlib import asynccontextmanager
 import asyncio
 import logging
 import os
-import uuid
-from datetime import datetime
-from typing import Dict, Any
 try:
     import sentry_sdk
     from sentry_sdk.integrations.fastapi import FastApiIntegration
@@ -20,7 +17,6 @@ from app.core.config import settings
 from app.core.dependencies import get_pipeline_deps, cleanup_dependencies
 from app.api import routes, websocket
 from app.agents.orchestrator import DiscoveryOrchestrator
-from app.agents.orchestrator import MusicDiscoveryOrchestrator
 
 # Configure logging
 logging.basicConfig(
@@ -191,51 +187,7 @@ async def debug_firecrawl():
         "status": "simple_check"
     }
 
-@app.post("/api/discover/search-talent")
-async def discover_talent_via_search(
-    request: Dict[str, Any] = Body(...)
-):
-    """NEW: Discover emerging talent using Firecrawl Search API"""
-    try:
-        logger.info("🔍 API: Starting search-based talent discovery")
-        
-        # Extract parameters
-        genres = request.get("genres", ["indie", "electronic", "hip hop", "rock", "pop"])
-        max_results = request.get("max_results", 20)
-        session_id = request.get("session_id", str(uuid.uuid4()))
-        
-        # Initialize orchestrator with search capabilities
-        orchestrator = MusicDiscoveryOrchestrator(
-            session_id=session_id,
-            use_v2_enrichment=True  # Ensure V2 agent is used for search features
-        )
-        
-        # Discover emerging talent via search
-        discovered_artists = await orchestrator.discover_emerging_talent_via_search(
-            genres=genres,
-            max_results=max_results
-        )
-        
-        return {
-            "success": True,
-            "session_id": session_id,
-            "discovery_method": "search_api",
-            "total_discovered": len(discovered_artists),
-            "artists": discovered_artists,
-            "metadata": {
-                "search_genres": genres,
-                "timestamp": datetime.utcnow().isoformat(),
-                "firecrawl_search_enabled": True
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"🔍 API: Search talent discovery failed: {str(e)}")
-        return {
-            "success": False,
-            "error": str(e),
-            "discovery_method": "search_api"
-        }
+
 
 # Add global exception handler
 @app.exception_handler(Exception)
