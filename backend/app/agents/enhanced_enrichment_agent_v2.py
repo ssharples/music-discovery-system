@@ -226,7 +226,7 @@ class EnhancedEnrichmentAgentV2:
                     enrichment_result["firecrawl_operations"].append("instagram_profile")
                     # Add delay to avoid rate limiting
                     await asyncio.sleep(2)
-                    instagram_data = await self._scrape_instagram_profile(artist_profile)
+                    instagram_data = await self._scrape_instagram_profile(artist_profile.instagram_handle)
                     if instagram_data:
                         enrichment_result["data"]["instagram"] = instagram_data
                         enrichment_result["instagram_enriched"] = True
@@ -528,27 +528,29 @@ class EnhancedEnrichmentAgentV2:
         self,
         artist_profile: ArtistProfile
     ) -> Optional[Dict[str, Any]]:
-        """Scrape Instagram profile using Firecrawl with structured extraction"""
-        
-        if not self.firecrawl_app:
-            logger.warning("🔥 Firecrawl not available for Instagram scraping")
-            return None
-        
-        instagram_handle = artist_profile.instagram_handle
-        if not instagram_handle:
-            instagram_handle = self._find_instagram_handle(artist_profile)
-            
-        if not instagram_handle:
-            logger.info(f"📷 No Instagram handle found for {artist_profile.name}")
-            return None
-        
-        instagram_url = f"https://www.instagram.com/{instagram_handle}/"
-        logger.info(f"🔥 FIRECRAWL DEBUG: Starting Instagram scrape for {artist_profile.name}")
-        logger.info(f"🔥 FIRECRAWL DEBUG: Target URL: {instagram_url}")
-        logger.info(f"🔥 FIRECRAWL DEBUG: Instagram handle: {instagram_handle}")
-        
+        """Scrape Instagram profile using Firecrawl for structured data extraction"""
         try:
-            # Define extraction schema for Instagram profile
+            if not self.firecrawl_app:
+                logger.warning("🔥 FIRECRAWL DEBUG: Firecrawl not available for Instagram scraping")
+                return None
+            
+            # Rate limiting
+            time.sleep(2)
+            
+            instagram_handle = artist_profile.instagram_handle
+            if not instagram_handle:
+                instagram_handle = self._find_instagram_handle(artist_profile)
+            
+            if not instagram_handle:
+                logger.info(f"📷 No Instagram handle found for {artist_profile.name}")
+                return None
+            
+            instagram_url = f"https://www.instagram.com/{instagram_handle}/"
+            logger.info(f"🔥 FIRECRAWL DEBUG: Starting Instagram scrape for {artist_profile.name}")
+            logger.info(f"🔥 FIRECRAWL DEBUG: Target URL: {instagram_url}")
+            logger.info(f"🔥 FIRECRAWL DEBUG: Instagram handle: {instagram_handle}")
+            
+            # Define structured extraction schema
             extraction_schema = {
                 "type": "object",
                 "properties": {
@@ -557,7 +559,7 @@ class EnhancedEnrichmentAgentV2:
                         "description": "Number of followers (e.g., '1.2M', '850K', '1,234')"
                     },
                     "bio": {
-                        "type": "string", 
+                        "type": "string",
                         "description": "Profile bio/description text"
                     },
                     "link_in_bio": {
@@ -582,70 +584,42 @@ class EnhancedEnrichmentAgentV2:
             # Scrape with structured extraction - use correct parameters for v2.8.0
             json_config = JsonConfig(
                 extractionSchema=extraction_schema,
-                mode="llm-extraction",
-                pageOptions={"onlyMainContent": True}
+                mode="llm-extraction"
             )
             
             response = self.firecrawl_app.scrape_url(
                 instagram_url,
-                formats=["json", "markdown"],
+                formats=["json"],
                 json_options=json_config
             )
             
-            logger.info(f"🔥 FIRECRAWL DEBUG: Raw response received for {instagram_url}")
-            logger.info(f"🔥 FIRECRAWL DEBUG: Response keys: {list(response.keys()) if response else 'None'}")
-            
-            if not response or not response.get('success'):
+            if not response or not response.success:
                 logger.warning(f"🔥 FIRECRAWL DEBUG: Failed response from Firecrawl for {instagram_url}")
                 return None
                 
-            data = response.get('data', {})
-            if not data:
+            if not hasattr(response, 'data') or not response.data:
                 logger.warning(f"🔥 FIRECRAWL DEBUG: No data in response: {response}")
                 return None
                 
-            extracted_data = data.get('json', {})
-            logger.info(f"🔥 FIRECRAWL DEBUG: Extracted data: {extracted_data}")
+            extracted_data = getattr(response.data, 'json', {})
             
             if not extracted_data:
-                logger.warning(f"🔥 FIRECRAWL DEBUG: No data extracted from {instagram_url}")
+                logger.warning(f"🔥 FIRECRAWL DEBUG: No JSON data extracted from {instagram_url}")
                 return None
+                
+            logger.info(f"🔥 FIRECRAWL DEBUG: Extracted Instagram data: {extracted_data}")
             
-            # Process extracted data
-            result = {
-                "username": instagram_handle,
-                "follower_count": 0,
+            # Map extracted data to our expected format
+            instagram_data = {
+                "follower_count": self._normalize_follower_count(extracted_data.get("follower_count")),
                 "bio": extracted_data.get("bio"),
                 "link_in_bio": extracted_data.get("link_in_bio"),
                 "is_verified": extracted_data.get("is_verified", False),
-                "has_spotify_link": False,
-                "spotify_url": None
+                "post_count": extracted_data.get("post_count")
             }
             
-            # Parse follower count
-            follower_str = extracted_data.get("follower_count", "0")
-            logger.info(f"🔥 FIRECRAWL DEBUG: Raw follower count string: '{follower_str}'")
-            
-            if follower_str:
-                result["follower_count"] = self._parse_follower_count(str(follower_str))
-                logger.info(f"🔥 FIRECRAWL DEBUG: Parsed follower count: {result['follower_count']}")
-            
-            # Check for Spotify links in bio or link
-            if result["bio"] or result["link_in_bio"]:
-                bio_text = (result["bio"] or "") + " " + (result["link_in_bio"] or "")
-                if "spotify.com" in bio_text.lower():
-                    result["has_spotify_link"] = True
-                    # Try to extract Spotify URL
-                    import re
-                    spotify_match = re.search(r'https?://[^\\s]*spotify\.com/[^\\s]*', bio_text)
-                    if spotify_match:
-                        result["spotify_url"] = spotify_match.group(0)
-                        logger.info(f"🔥 FIRECRAWL DEBUG: Found Spotify URL in bio: {result['spotify_url']}")
-            
-            logger.info(f"🔥 FIRECRAWL DEBUG: Final Instagram result for {artist_profile.name}: {result}")
-            logger.info(f"✅ Instagram profile scraped successfully for {artist_profile.name} - {result['follower_count']} followers")
-            
-            return result
+            logger.info(f"🔥 FIRECRAWL DEBUG: Instagram scraping successful for {artist_profile.name}")
+            return instagram_data
             
         except Exception as e:
             logger.error(f"🔥 FIRECRAWL DEBUG: Instagram scraping failed for {instagram_url}: {e}")
@@ -656,18 +630,20 @@ class EnhancedEnrichmentAgentV2:
         self,
         spotify_artist_id: str
     ) -> Optional[Dict[str, Any]]:
-        """Scrape Spotify artist profile page using Firecrawl"""
-        
-        if not self.firecrawl_app:
-            logger.warning("🔥 Firecrawl not available for Spotify profile scraping")
-            return None
-        
-        spotify_url = f"https://open.spotify.com/artist/{spotify_artist_id}"
-        logger.info(f"🔥 FIRECRAWL DEBUG: Starting Spotify profile scrape")
-        logger.info(f"🔥 FIRECRAWL DEBUG: Target URL: {spotify_url}")
-        logger.info(f"🔥 FIRECRAWL DEBUG: Spotify artist ID: {spotify_artist_id}")
-        
+        """Scrape Spotify profile page using Firecrawl for additional details"""
         try:
+            if not self.firecrawl_app:
+                logger.warning("🔥 FIRECRAWL DEBUG: Firecrawl not available for Spotify scraping")
+                return None
+            
+            # Rate limiting
+            time.sleep(2)
+            
+            spotify_url = f"https://open.spotify.com/artist/{spotify_artist_id}"
+            logger.info(f"🔥 FIRECRAWL DEBUG: Starting Spotify profile scrape")
+            logger.info(f"🔥 FIRECRAWL DEBUG: Target URL: {spotify_url}")
+            logger.info(f"🔥 FIRECRAWL DEBUG: Spotify artist ID: {spotify_artist_id}")
+            
             # Define extraction schema for Spotify profile
             extraction_schema = {
                 "type": "object",
@@ -698,58 +674,48 @@ class EnhancedEnrichmentAgentV2:
             # Use correct API parameters for firecrawl-py v2.8.0
             json_config = JsonConfig(
                 extractionSchema=extraction_schema,
-                mode="llm-extraction",
-                pageOptions={"onlyMainContent": True}
+                mode="llm-extraction"
             )
             
             response = self.firecrawl_app.scrape_url(
                 spotify_url,
-                formats=["json", "markdown"],
+                formats=["json"],
                 json_options=json_config
             )
             
             logger.info(f"🔥 FIRECRAWL DEBUG: Spotify raw response received")
-            logger.info(f"🔥 FIRECRAWL DEBUG: Response keys: {list(response.keys()) if response else 'None'}")
             
             # Check for response data in v2.8.0 format
-            extracted_data = None
-            if response and response.get('success'):
-                data = response.get('data', {})
-                extracted_data = data.get('json', {})
+            if not response or not response.success:
+                logger.warning(f"🔥 FIRECRAWL DEBUG: Failed response from Firecrawl for {spotify_url}")
+                return None
+                
+            if not hasattr(response, 'data') or not response.data:
+                logger.warning(f"🔥 FIRECRAWL DEBUG: No data in response")
+                return None
+                
+            extracted_data = getattr(response.data, 'json', {})
             
             if not extracted_data:
-                logger.warning(f"🔥 FIRECRAWL DEBUG: No data extracted from Spotify profile - Response: {response}")
+                logger.warning(f"🔥 FIRECRAWL DEBUG: No JSON data extracted from Spotify profile")
                 return None
             
-            logger.info(f"🔥 FIRECRAWL DEBUG: Spotify extracted data: {extracted_data}")
+            logger.info(f"🔥 FIRECRAWL DEBUG: Extracted Spotify profile data: {extracted_data}")
             
-            # Process extracted data
-            result = {
-                "monthly_listeners": 0,
+            # Process the extracted data
+            spotify_profile = {
+                "monthly_listeners": extracted_data.get("monthly_listeners"),
                 "bio": extracted_data.get("bio"),
                 "verified": extracted_data.get("verified", False),
                 "top_cities": extracted_data.get("top_cities", [])
             }
             
-            # Parse monthly listeners
-            listener_str = extracted_data.get("monthly_listeners", "0")
-            logger.info(f"🔥 FIRECRAWL DEBUG: Raw monthly listeners string: '{listener_str}'")
-            
-            if listener_str:
-                result["monthly_listeners"] = self._parse_listener_count(str(listener_str))
-                logger.info(f"🔥 FIRECRAWL DEBUG: Parsed monthly listeners: {result['monthly_listeners']}")
-            
-            logger.info(f"🔥 FIRECRAWL DEBUG: Final Spotify profile result: {result}")
-            logger.info(f"✅ Spotify profile scraped successfully - {result['monthly_listeners']} monthly listeners")
-            
-            return result
+            logger.info(f"🔥 FIRECRAWL DEBUG: Spotify profile scraping successful")
+            return spotify_profile
             
         except Exception as e:
             logger.error(f"🔥 FIRECRAWL DEBUG: Spotify profile scraping failed for {spotify_url}: {e}")
             logger.error(f"🔥 FIRECRAWL DEBUG: Exception type: {type(e).__name__}")
-            # Check if rate limited
-            if "429" in str(e) or "rate limit" in str(e).lower():
-                logger.warning(f"🔥 FIRECRAWL DEBUG: Rate limited - will retry later")
             return None
     
     async def _get_artist_top_songs(
@@ -863,37 +829,40 @@ class EnhancedEnrichmentAgentV2:
                 
                 logger.info(f"🔥 FIRECRAWL DEBUG: Using lyrics extraction schema for {song_name}")
                 
+                # Use correct API structure for v2.8.0
+                json_config = JsonConfig(
+                    extractionSchema=lyrics_schema,
+                    mode="llm-extraction"
+                )
+                
                 # Scrape lyrics with Firecrawl
                 response = self.firecrawl_app.scrape_url(
                     musixmatch_url,
-                    params={
-                        'formats': ['extract', 'markdown'],
-                        'extract': {
-                            'schema': lyrics_schema
-                        },
-                        'timeout': 25000,
-                        'waitFor': 2000
-                    }
+                    formats=["json"],
+                    json_options=json_config
                 )
                 
                 logger.info(f"🔥 FIRECRAWL DEBUG: Lyrics response received for {song_name}")
-                logger.info(f"🔥 FIRECRAWL DEBUG: Response keys: {list(response.keys()) if response else 'None'}")
                 
-                if not response:
-                    logger.warning(f"🔥 FIRECRAWL DEBUG: Empty lyrics response for {song_name}")
+                if not response or not response.success:
+                    logger.warning(f"🔥 FIRECRAWL DEBUG: Failed lyrics response for {song_name}")
                     continue
                 
-                # Try to get lyrics from extract first, then markdown
-                lyrics_text = None
+                if not hasattr(response, 'data') or not response.data:
+                    logger.warning(f"🔥 FIRECRAWL DEBUG: No data in lyrics response for {song_name}")
+                    continue
                 
-                if 'extract' in response and response['extract']:
-                    extracted_data = response['extract']
+                # Try to get lyrics from json extraction
+                lyrics_text = None
+                extracted_data = getattr(response.data, 'json', {})
+                
+                if extracted_data:
                     lyrics_text = extracted_data.get('lyrics')
                     logger.info(f"🔥 FIRECRAWL DEBUG: Extracted lyrics length: {len(lyrics_text) if lyrics_text else 0} chars")
                 
                 # Fallback to markdown if extract didn't work
-                if not lyrics_text and 'markdown' in response:
-                    markdown_content = response['markdown']
+                if not lyrics_text and hasattr(response.data, 'markdown'):
+                    markdown_content = response.data.markdown
                     lyrics_text = self._extract_lyrics_from_content(markdown_content)
                     logger.info(f"🔥 FIRECRAWL DEBUG: Markdown fallback lyrics length: {len(lyrics_text) if lyrics_text else 0} chars")
                 
@@ -1022,20 +991,19 @@ class EnhancedEnrichmentAgentV2:
             # Scrape contact page with Firecrawl v2.8.0
             json_config = JsonConfig(
                 extractionSchema=contact_schema,
-                mode="llm-extraction",
-                pageOptions={"onlyMainContent": True}
+                mode="llm-extraction"
             )
             
             response = self.firecrawl_app.scrape_url(
                 url,
-                formats=["json", "markdown"],
+                formats=["json"],
                 json_options=json_config
             )
             
             logger.info(f"🔥 FIRECRAWL DEBUG: Contact extraction response received")
             logger.info(f"🔥 FIRECRAWL DEBUG: Response keys: {list(response.keys()) if response else 'None'}")
             
-            if not response or not response.get('success'):
+            if not response or not response.success:
                 logger.warning(f"🔥 FIRECRAWL DEBUG: Failed contact response for {url}")
                 return None
             
@@ -1245,32 +1213,36 @@ class EnhancedEnrichmentAgentV2:
         return min(score, 1.0)
 
     async def _search_artist_web_presence(self, artist_name: str) -> Dict[str, Any]:
-        """
-        Use Firecrawl Search API to discover artist's web presence for ENRICHMENT ONLY
-        """
-        logger.info(f"🔍 SEARCH API: Starting web presence enrichment for {artist_name}")
-        
-        if not self.firecrawl_app:
-            logger.warning("🔍 SEARCH API: Firecrawl not available, skipping web search enrichment")
-            return {}
-        
-        search_results = {}
-        
+        """Search for artist's web presence using Firecrawl Search API"""
         try:
-            # Search for official websites and social media for enrichment
+            if not self.firecrawl_app:
+                logger.warning("🔍 SEARCH API: Firecrawl not available for web search")
+                return {}
+            
+            logger.info(f"🔍 SEARCH API: Starting web presence enrichment for {artist_name}")
+            
             search_queries = [
                 f'"{artist_name}" official website',
-                f'"{artist_name}" instagram',
+                f'"{artist_name}" instagram', 
                 f'"{artist_name}" twitter',
                 f'"{artist_name}" soundcloud',
                 f'"{artist_name}" bandcamp',
-                f'"{artist_name}" linktree',
-                f'"{artist_name}" contact booking email'
+                f'"{artist_name}" linktree'
             ]
+            
+            web_presence = {
+                "official_website": None,
+                "social_links": [],
+                "music_platforms": [],
+                "contact_info": {}
+            }
             
             for query in search_queries:
                 try:
                     logger.info(f"🔍 SEARCH API: Searching for '{query}'")
+                    
+                    # Rate limiting
+                    time.sleep(1)
                     
                     # Use correct parameters for firecrawl-py v2.8.0
                     search_result = self.firecrawl_app.search(
@@ -1278,33 +1250,41 @@ class EnhancedEnrichmentAgentV2:
                         limit=3  # Direct parameter for v2.8.0
                     )
                     
-                    if search_result and search_result.get("success") and search_result.get("data"):
-                        search_results[query] = search_result["data"]
-                        logger.info(f"🔍 SEARCH API: Found {len(search_result['data'])} results for '{query}'")
+                    if not search_result or not search_result.success:
+                        logger.warning(f"🔍 SEARCH API: No successful search result for '{query}'")
+                        continue
+                        
+                    if not hasattr(search_result, 'data') or not search_result.data:
+                        logger.warning(f"🔍 SEARCH API: No data in search result for '{query}'")
+                        continue
+                        
+                    # Process search results
+                    search_data = search_result.data
+                    if hasattr(search_data, '__iter__'):  # Check if it's iterable
+                        for result in search_data:
+                            if hasattr(result, 'url'):
+                                url = result.url
+                            elif isinstance(result, dict):
+                                url = result.get('url')
+                            else:
+                                continue
+                                
+                            if url:
+                                self._categorize_url(url, web_presence)
                     
                 except Exception as e:
-                    error_msg = str(e)
-                    if "unsupported parameter" in error_msg.lower() or "unrecognized" in error_msg.lower():
-                        logger.error(f"🔍 SEARCH API: API parameter error for '{query}': {error_msg}")
-                        # Try basic search without extra parameters
-                        try:
-                            search_result = self.firecrawl_app.search(query, limit=3)
-                            if search_result and search_result.get("data"):
-                                search_results[query] = search_result["data"]
-                                logger.info(f"🔍 SEARCH API: Basic search successful for '{query}'")
-                        except Exception as e2:
-                            logger.error(f"🔍 SEARCH API: Basic search also failed for '{query}': {str(e2)}")
-                    elif "429" in error_msg or "rate limit" in error_msg.lower():
-                        logger.warning(f"🔍 SEARCH API: Rate limited on query '{query}' - stopping search")
-                        break  # Stop on rate limit
-                    else:
-                        logger.error(f"🔍 SEARCH API: Failed to search for '{query}': {error_msg}")
-                    continue
+                        if "rate limit" in str(e).lower() or "429" in str(e):
+                            logger.warning(f"🔍 SEARCH API: Rate limited on query '{query}' - stopping search")
+                            break
+                        else:
+                            logger.error(f"🔍 SEARCH API: Failed to search for '{query}': {e}")
+                            continue
             
-            return search_results
+            logger.info(f"🔍 SEARCH API: Web presence search completed for {artist_name}")
+            return web_presence
             
         except Exception as e:
-            logger.error(f"🔍 SEARCH API: Web enrichment search failed for {artist_name}: {str(e)}")
+            logger.error(f"🔍 SEARCH API: Web presence search failed for {artist_name}: {e}")
             return {}
 
     async def _extract_contact_from_search_results(self, search_results: Dict[str, Any]) -> Dict[str, Any]:
@@ -1378,6 +1358,166 @@ class EnhancedEnrichmentAgentV2:
             return match.group(1) if match else None
         
         return None
+
+    def _categorize_url(self, url: str, web_presence: Dict[str, Any]) -> None:
+        """Categorize URLs into appropriate web presence categories"""
+        try:
+            domain = urlparse(url).netloc.lower()
+            
+            # Social media platforms
+            if 'instagram.com' in domain:
+                web_presence['social_links'].append({'platform': 'instagram', 'url': url})
+            elif 'twitter.com' in domain or 'x.com' in domain:
+                web_presence['social_links'].append({'platform': 'twitter', 'url': url})
+            elif 'tiktok.com' in domain:
+                web_presence['social_links'].append({'platform': 'tiktok', 'url': url})
+            elif 'facebook.com' in domain:
+                web_presence['social_links'].append({'platform': 'facebook', 'url': url})
+            elif 'youtube.com' in domain:
+                web_presence['social_links'].append({'platform': 'youtube', 'url': url})
+            
+            # Music platforms
+            elif 'spotify.com' in domain:
+                web_presence['music_platforms'].append({'platform': 'spotify', 'url': url})
+            elif 'soundcloud.com' in domain:
+                web_presence['music_platforms'].append({'platform': 'soundcloud', 'url': url})
+            elif 'bandcamp.com' in domain:
+                web_presence['music_platforms'].append({'platform': 'bandcamp', 'url': url})
+            elif 'apple.com' in domain and 'music' in url:
+                web_presence['music_platforms'].append({'platform': 'apple_music', 'url': url})
+                
+            # Link aggregators
+            elif 'linktree' in domain or 'linktr.ee' in domain:
+                web_presence['social_links'].append({'platform': 'linktree', 'url': url})
+                
+            # Official websites (exclude major platforms)
+            elif not any(platform in domain for platform in ['google.', 'wikipedia.', 'youtube.', 'spotify.', 'instagram.', 'twitter.', 'facebook.', 'tiktok.']):
+                if not web_presence['official_website']:  # Take first official website found
+                    web_presence['official_website'] = url
+                    
+        except Exception as e:
+            logger.warning(f"🔍 URL categorization failed for {url}: {e}")
+
+    def _extract_contact_information(self, urls: List[str]) -> Dict[str, Any]:
+        """Extract contact information from discovered URLs using Firecrawl"""
+        try:
+            if not self.firecrawl_app or not urls:
+                return {}
+                
+            contact_info = {}
+            
+            for url in urls[:3]:  # Limit to first 3 URLs to avoid rate limits
+                try:
+                    # Rate limiting
+                    time.sleep(2)
+                    
+                    contact_schema = {
+                        "type": "object",
+                        "properties": {
+                            "email": {
+                                "type": "string",
+                                "description": "Contact email address"
+                            },
+                            "phone": {
+                                "type": "string", 
+                                "description": "Phone number"
+                            },
+                            "booking_email": {
+                                "type": "string",
+                                "description": "Booking or management email"
+                            },
+                            "location": {
+                                "type": "string",
+                                "description": "Artist location or based in"
+                            },
+                            "website": {
+                                "type": "string",
+                                "description": "Official website URL"
+                            },
+                            "social_links": {
+                                "type": "array",
+                                "description": "Social media links",
+                                "items": {"type": "string"}
+                            }
+                        }
+                    }
+                    
+                    logger.info(f"🔥 FIRECRAWL DEBUG: Extracting contact info from {url}")
+                    
+                    # Scrape contact page with Firecrawl v2.8.0
+                    json_config = JsonConfig(
+                        extractionSchema=contact_schema,
+                        mode="llm-extraction"
+                    )
+                    
+                    response = self.firecrawl_app.scrape_url(
+                        url,
+                        formats=["json"],
+                        json_options=json_config
+                    )
+                    
+                    if not response or not response.success:
+                        logger.warning(f"🔥 FIRECRAWL DEBUG: Failed contact response for {url}")
+                        continue
+                        
+                    if not hasattr(response, 'data') or not response.data:
+                        logger.warning(f"🔥 FIRECRAWL DEBUG: No data in contact response")
+                        continue
+                        
+                    extracted_data = getattr(response.data, 'json', {})
+                    
+                    if extracted_data:
+                        contact_info.update({
+                            "email": extracted_data.get("email"),
+                            "phone": extracted_data.get("phone"), 
+                            "booking_email": extracted_data.get("booking_email"),
+                            "location": extracted_data.get("location"),
+                            "website": extracted_data.get("website"),
+                            "social_links": extracted_data.get("social_links", [])
+                        })
+                        
+                        logger.info(f"🔥 FIRECRAWL DEBUG: Extracted contact info: {extracted_data}")
+                        
+                        # If we got substantial contact info, break early
+                        if contact_info.get("email") or contact_info.get("phone"):
+                            break
+                            
+                except Exception as e:
+                    logger.error(f"🔥 FIRECRAWL DEBUG: Contact extraction failed for {url}: {e}")
+                    continue
+                    
+            return contact_info
+            
+        except Exception as e:
+            logger.error(f"🔥 FIRECRAWL DEBUG: Contact information extraction failed: {e}")
+            return {}
+
+    def _normalize_follower_count(self, follower_str: Optional[str]) -> int:
+        """Normalize follower count string to integer"""
+        if not follower_str:
+            return 0
+            
+        try:
+            # Remove non-alphanumeric characters except K, M, B
+            clean_str = re.sub(r'[^\d\.KMBkmb]', '', str(follower_str))
+            
+            if not clean_str:
+                return 0
+                
+            # Handle K, M, B multipliers
+            if clean_str.lower().endswith('k'):
+                return int(float(clean_str[:-1]) * 1000)
+            elif clean_str.lower().endswith('m'):
+                return int(float(clean_str[:-1]) * 1000000)
+            elif clean_str.lower().endswith('b'):
+                return int(float(clean_str[:-1]) * 1000000000)
+            else:
+                # Remove commas and periods for regular numbers
+                clean_str = clean_str.replace(',', '').replace('.', '')
+                return int(clean_str) if clean_str.isdigit() else 0
+                
+        except (ValueError, AttributeError):
+            return 0
 
 def get_enhanced_enrichment_agent_v2() -> EnhancedEnrichmentAgentV2:
     """Factory function to get enhanced enrichment agent instance"""
