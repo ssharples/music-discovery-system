@@ -21,7 +21,8 @@ DECLARE
   artist_rec RECORD;
   current_score FLOAT;
 BEGIN
-  SELECT *, enrichment_score INTO artist_rec, current_score FROM artists WHERE id = artist_uuid;
+  SELECT * INTO artist_rec FROM artists WHERE id = artist_uuid;
+  current_score := artist_rec.enrichment_score;
   
   -- Base score components
   IF artist_rec.youtube_channel_id IS NOT NULL THEN score := score + 0.1; END IF;

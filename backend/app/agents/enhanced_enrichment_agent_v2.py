@@ -110,6 +110,10 @@ class EnhancedEnrichmentAgentV2:
         
         logger.info(f"🎯 Starting comprehensive enrichment for {artist_profile.name}")
         
+        # Ensure lyrical_themes is initialized to prevent validation errors
+        if artist_profile.lyrical_themes is None:
+            artist_profile.lyrical_themes = []
+        
         enrichment_result = {
             "success": True,
             "artist_name": artist_profile.name,
@@ -118,7 +122,8 @@ class EnhancedEnrichmentAgentV2:
             "spotify_profile_scraped": False,
             "lyrics_analyzed": False,
             "errors": [],
-            "data": {}
+            "data": {},
+            "enriched_profile": artist_profile  # Return the enriched profile
         }
         
         try:
@@ -136,32 +141,35 @@ class EnhancedEnrichmentAgentV2:
                 
                 logger.info(f"✅ Spotify data retrieved for {artist_profile.name}")
             
-            # Step 2: Scrape and validate Instagram
+            # Step 2: Scrape and validate Instagram using Firecrawl
             if artist_profile.instagram_handle or self._find_instagram_handle(artist_profile):
-                instagram_data = await self._scrape_instagram_profile(artist_profile)
-                if instagram_data:
-                    enrichment_result["data"]["instagram"] = instagram_data
-                    enrichment_result["instagram_enriched"] = True
-                    
-                    # Update artist profile
-                    artist_profile.follower_counts["instagram"] = instagram_data.get("follower_count", 0)
-                    
-                    # Extract contact info from link in bio
-                    if instagram_data.get("link_in_bio"):
-                        contact_info = await self._extract_contact_from_url(instagram_data["link_in_bio"])
-                        if contact_info:
-                            if contact_info.get("email"):
-                                artist_profile.email = contact_info["email"]
-                            if contact_info.get("location"):
-                                artist_profile.location = contact_info["location"]
-                    
-                    # Validate Spotify if found in Instagram
-                    if instagram_data.get("has_spotify_link") and spotify_data:
-                        enrichment_result["spotify_validated"] = True
-                        logger.info(f"✅ Spotify validated via Instagram for {artist_profile.name}")
+                if self.firecrawl_app:
+                    instagram_data = await self._scrape_instagram_profile(artist_profile)
+                    if instagram_data:
+                        enrichment_result["data"]["instagram"] = instagram_data
+                        enrichment_result["instagram_enriched"] = True
+                        
+                        # Update artist profile
+                        artist_profile.follower_counts["instagram"] = instagram_data.get("follower_count", 0)
+                        
+                        # Extract contact info from link in bio
+                        if instagram_data.get("link_in_bio"):
+                            contact_info = await self._extract_contact_from_url(instagram_data["link_in_bio"])
+                            if contact_info:
+                                if contact_info.get("email"):
+                                    artist_profile.email = contact_info["email"]
+                                if contact_info.get("location"):
+                                    artist_profile.location = contact_info["location"]
+                        
+                        # Validate Spotify if found in Instagram
+                        if instagram_data.get("has_spotify_link") and spotify_data:
+                            enrichment_result["spotify_validated"] = True
+                            logger.info(f"✅ Spotify validated via Instagram for {artist_profile.name}")
+                else:
+                    logger.warning(f"⚠️ Firecrawl not available, skipping Instagram enrichment for {artist_profile.name}")
             
-            # Step 3: Scrape Spotify profile for additional data
-            if artist_profile.spotify_id:
+            # Step 3: Scrape Spotify profile for additional data using Firecrawl
+            if artist_profile.spotify_id and self.firecrawl_app:
                 spotify_profile_data = await self._scrape_spotify_profile(artist_profile.spotify_id)
                 if spotify_profile_data:
                     enrichment_result["data"]["spotify_profile"] = spotify_profile_data
@@ -175,17 +183,22 @@ class EnhancedEnrichmentAgentV2:
                     artist_profile.metadata["monthly_listeners"] = spotify_profile_data.get("monthly_listeners", 0)
                     artist_profile.metadata["top_cities"] = spotify_profile_data.get("top_cities", [])
             
-            # Step 4: Get top songs and analyze lyrics
+            # Step 4: Get top songs and analyze lyrics using Firecrawl
             if artist_profile.spotify_id:
                 top_songs = await self._get_artist_top_songs(deps, artist_profile.spotify_id)
-                if top_songs:
+                if top_songs and self.firecrawl_app:
                     lyrical_themes = await self._analyze_song_lyrics(artist_profile.name, top_songs[:3])
                     if lyrical_themes:
                         enrichment_result["data"]["lyrical_analysis"] = lyrical_themes
                         enrichment_result["lyrics_analyzed"] = True
                         
-                        # Update artist profile with themes
-                        artist_profile.lyrical_themes = lyrical_themes.get("themes", [])
+                        # Update artist profile with themes - ensure it's a list
+                        themes = lyrical_themes.get("themes", [])
+                        if isinstance(themes, list):
+                            artist_profile.lyrical_themes = themes
+                        else:
+                            artist_profile.lyrical_themes = []
+                            logger.warning(f"Lyrical themes not in expected list format: {themes}")
             
             # Calculate enhanced enrichment score
             artist_profile.enrichment_score = self._calculate_comprehensive_score(
@@ -199,19 +212,26 @@ class EnhancedEnrichmentAgentV2:
                 "validation_status": {
                     "spotify_validated": enrichment_result["spotify_validated"],
                     "instagram_enriched": enrichment_result["instagram_enriched"],
+                    "spotify_profile_scraped": enrichment_result["spotify_profile_scraped"],
                     "lyrics_analyzed": enrichment_result["lyrics_analyzed"]
+                },
+                "firecrawl_usage": {
+                    "instagram_scraped": enrichment_result["instagram_enriched"],
+                    "spotify_profile_scraped": enrichment_result["spotify_profile_scraped"],
+                    "lyrics_scraped": enrichment_result["lyrics_analyzed"]
                 }
             })
             
-            enrichment_result["enrichment_score"] = artist_profile.enrichment_score
+            # Update the enriched profile in result
             enrichment_result["enriched_profile"] = artist_profile
             
-            logger.info(f"🎉 Comprehensive enrichment completed for {artist_profile.name} (score: {artist_profile.enrichment_score:.2f})")
+            logger.info(f"🎨 Comprehensive enrichment completed for {artist_profile.name} (score: {artist_profile.enrichment_score:.2f})")
             
         except Exception as e:
             logger.error(f"❌ Comprehensive enrichment failed for {artist_profile.name}: {e}")
             enrichment_result["success"] = False
             enrichment_result["errors"].append(str(e))
+            enrichment_result["enriched_profile"] = artist_profile  # Return profile even on error
         
         return enrichment_result
     
@@ -220,72 +240,86 @@ class EnhancedEnrichmentAgentV2:
         deps: PipelineDependencies,
         artist_profile: ArtistProfile
     ) -> Optional[Dict[str, Any]]:
-        """Get Spotify artist data using the API"""
+        """Get Spotify artist data with validation"""
         
-        if not settings.is_spotify_configured():
-            logger.info("Spotify not configured")
+        if not deps.spotify_client:
+            logger.warning("⚠️ Spotify client not available")
             return None
         
         try:
-            # Get Spotify access token
-            auth_response = await deps.http_client.post(
-                "https://accounts.spotify.com/api/token",
-                data={
-                    "grant_type": "client_credentials",
-                    "client_id": settings.SPOTIFY_CLIENT_ID,
-                    "client_secret": settings.SPOTIFY_CLIENT_SECRET
-                }
-            )
-            auth_response.raise_for_status()
-            access_token = auth_response.json()["access_token"]
+            spotify_data = None
             
-            headers = {"Authorization": f"Bearer {access_token}"}
+            # First, try using pre-discovered Spotify ID from YouTube descriptions
+            if artist_profile.spotify_id:
+                logger.info(f"🎵 Using pre-discovered Spotify ID: {artist_profile.spotify_id}")
+                try:
+                    spotify_data = await deps.spotify_client.get_artist(artist_profile.spotify_id)
+                    if spotify_data:
+                        logger.info(f"✅ Retrieved Spotify data using pre-discovered ID for {artist_profile.name}")
+                        return self._format_spotify_artist_data(spotify_data)
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to get artist data with pre-discovered ID: {e}")
             
-            # Search for artist if no Spotify ID
-            if not artist_profile.spotify_id:
-                search_response = await deps.http_client.get(
-                    "https://api.spotify.com/v1/search",
-                    headers=headers,
-                    params={
-                        "q": artist_profile.name,
-                        "type": "artist",
-                        "limit": 5
-                    }
-                )
-                search_response.raise_for_status()
-                
-                artists = search_response.json()["artists"]["items"]
-                if not artists:
-                    return None
-                
-                # Find best match
-                artist_data = artists[0]
-                for artist in artists:
-                    if artist["name"].lower() == artist_profile.name.lower():
-                        artist_data = artist
-                        break
+            # Fallback: Search by artist name
+            logger.info(f"🔍 Searching Spotify for artist: {artist_profile.name}")
+            search_results = await deps.spotify_client.search_artist(artist_profile.name)
+            
+            if not search_results or not search_results.get('artists', {}).get('items'):
+                logger.info(f"❌ No Spotify artist found for: {artist_profile.name}")
+                return None
+            
+            # Find best match
+            artists = search_results['artists']['items']
+            best_match = self._find_best_spotify_match(artist_profile.name, artists)
+            
+            if best_match:
+                spotify_data = best_match
+                logger.info(f"✅ Found Spotify match for {artist_profile.name}: {best_match.get('name')}")
+                return self._format_spotify_artist_data(spotify_data)
             else:
-                # Get artist by ID
-                artist_response = await deps.http_client.get(
-                    f"https://api.spotify.com/v1/artists/{artist_profile.spotify_id}",
-                    headers=headers
-                )
-                artist_response.raise_for_status()
-                artist_data = artist_response.json()
-            
-            return {
-                "id": artist_data["id"],
-                "name": artist_data["name"],
-                "genres": artist_data.get("genres", []),
-                "images": artist_data.get("images", []),
-                "followers": artist_data["followers"]["total"],
-                "popularity": artist_data.get("popularity", 0),
-                "external_urls": artist_data.get("external_urls", {})
-            }
+                logger.info(f"❌ No good Spotify match for: {artist_profile.name}")
+                return None
             
         except Exception as e:
-            logger.error(f"Spotify API error: {e}")
+            logger.error(f"❌ Spotify search error for {artist_profile.name}: {e}")
             return None
+    
+    def _format_spotify_artist_data(self, spotify_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Format Spotify artist data consistently"""
+        return {
+            "id": spotify_data.get("id"),
+            "name": spotify_data.get("name"),
+            "genres": spotify_data.get("genres", []),
+            "images": spotify_data.get("images", []),
+            "followers": spotify_data.get("followers", {}).get("total", 0),
+            "popularity": spotify_data.get("popularity", 0),
+            "external_urls": spotify_data.get("external_urls", {})
+        }
+    
+    def _find_best_spotify_match(self, artist_name: str, artists: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Find the best matching Spotify artist from search results"""
+        if not artists:
+            return None
+        
+        artist_name_lower = artist_name.lower().strip()
+        
+        # First priority: Exact name match
+        for artist in artists:
+            if artist.get("name", "").lower().strip() == artist_name_lower:
+                logger.info(f"🎯 Exact Spotify match found: {artist.get('name')}")
+                return artist
+        
+        # Second priority: Case-insensitive contains match
+        for artist in artists:
+            spotify_name = artist.get("name", "").lower().strip()
+            if artist_name_lower in spotify_name or spotify_name in artist_name_lower:
+                logger.info(f"🎯 Partial Spotify match found: {artist.get('name')}")
+                return artist
+        
+        # Fallback: Return the most popular artist (highest follower count)
+        best_artist = max(artists, key=lambda x: x.get("followers", {}).get("total", 0))
+        logger.info(f"🎯 Using most popular Spotify match: {best_artist.get('name')}")
+        return best_artist
     
     async def _scrape_instagram_profile(
         self,
@@ -642,14 +676,32 @@ class EnhancedEnrichmentAgentV2:
         return sorted_images[0].get('url') if sorted_images else None
     
     def _find_instagram_handle(self, artist_profile: ArtistProfile) -> Optional[str]:
-        """Find Instagram handle from social links"""
+        """Find Instagram handle from pre-discovered URLs or social links"""
+        
+        # First check pre-discovered social media from YouTube descriptions
+        pre_discovered = artist_profile.metadata.get("pre_discovered_social", {})
+        instagram_url = pre_discovered.get("instagram_url")
+        
+        if instagram_url:
+            # Extract username from pre-discovered URL
+            match = re.search(r'instagram\.com/([a-zA-Z0-9._]+)', instagram_url)
+            if match:
+                handle = match.group(1)
+                artist_profile.instagram_handle = handle
+                logger.info(f"🔗 Using pre-discovered Instagram handle: {handle}")
+                return handle
+        
+        # Fallback to existing social links
         for link in artist_profile.social_links.values():
             if 'instagram.com' in str(link).lower():
                 # Extract username from URL
                 match = re.search(r'instagram\.com/([a-zA-Z0-9._]+)', link)
                 if match:
-                    artist_profile.instagram_handle = match.group(1)
-                    return match.group(1)
+                    handle = match.group(1)
+                    artist_profile.instagram_handle = handle
+                    logger.info(f"🔗 Using existing Instagram handle: {handle}")
+                    return handle
+        
         return None
     
     def _parse_follower_count(self, follower_str: str) -> int:

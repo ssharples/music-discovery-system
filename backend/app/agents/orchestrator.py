@@ -2,13 +2,14 @@
 from pydantic_ai import Agent, ModelRetry
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.deepseek import DeepSeekProvider
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from uuid import uuid4, UUID
 import logging
 import asyncio
 from datetime import datetime, timedelta, timezone
 from fastapi import BackgroundTasks
 import time
+import re
 
 from app.core.config import settings
 from app.core.dependencies import PipelineDependencies
@@ -659,6 +660,11 @@ class DiscoveryOrchestrator:
         channel_title = channel_data.get('channel_title', 'Unknown Artist')
         channel_id = channel_data.get('channel_id')
         
+        # Validate artist name is in English (exclude non-English characters)
+        if not self._is_artist_name_english(artist_name):
+            logger.info(f"🚫 FILTERED OUT: '{artist_name}' - contains non-English characters")
+            return None
+        
         # Log the artist name selection for debugging
         if channel_data.get('extracted_artist_name'):
             logger.info(f"🎤 Using extracted artist name: '{artist_name}' (Channel: '{channel_title}')")
@@ -671,21 +677,40 @@ class DiscoveryOrchestrator:
             if existing_artist:
                 logger.info(f"📋 Artist already exists in database: {artist_name}")
                 return existing_artist
+
+            # Phase 0.5: Extract social media URLs from YouTube video descriptions
+            instagram_url, spotify_url = self._extract_social_urls_from_videos(channel_data)
             
-            # Phase 1: Basic profile creation
+            # Phase 1: Basic profile creation with pre-discovered social media
             profile_id = uuid4()
             base_profile = ArtistProfile(
                 id=profile_id,
                 name=artist_name,  # Use the extracted/corrected artist name
                 youtube_channel_id=channel_id,
                 youtube_channel_name=channel_title,  # Keep original channel name for reference
+                instagram_handle=self._extract_instagram_handle(instagram_url) if instagram_url else None,
+                lyrical_themes=[],  # Initialize as empty list to prevent validation errors
                 metadata={
                     "discovery_session_id": str(session_id),
                     "youtube_data": channel_data,
                     "processed_at": datetime.now().isoformat(),
-                    "artist_name_source": "extracted_from_video_titles" if channel_data.get('extracted_artist_name') else "channel_title"
+                    "artist_name_source": "extracted_from_video_titles" if channel_data.get('extracted_artist_name') else "channel_title",
+                    "pre_discovered_social": {
+                        "instagram_url": instagram_url,
+                        "spotify_url": spotify_url
+                    }
                 }
             )
+            
+            # Add social links if found
+            if instagram_url:
+                base_profile.social_links["instagram"] = instagram_url
+            if spotify_url:
+                base_profile.social_links["spotify"] = spotify_url
+                # Extract Spotify ID from URL if possible
+                spotify_id = self._extract_spotify_id_from_url(spotify_url)
+                if spotify_id:
+                    base_profile.spotify_id = spotify_id
             
             # Phase 2: Enrichment with retry logic
             enriched_profile = await self._enrich_artist_with_retry(
@@ -718,33 +743,16 @@ class DiscoveryOrchestrator:
                     logger.warning(f"⚠️ AI detection failed for {artist_name}: {e}")
                     # Continue processing if AI detection fails
             
-            # Phase 3: Lyrics analysis (if agents available)
-            videos_with_captions = []
-            lyric_analyses = []
-            
-            if self.lyrics_agent:
-                try:
-                    videos_with_captions = await self.youtube_agent.get_artist_videos_with_captions(
-                        deps, channel_id, max_videos=3
-                    )
-                    
-                    if videos_with_captions:
-                        lyric_analyses = await self.lyrics_agent.analyze_artist_lyrics(
-                            deps, str(enriched_profile.id or profile_id), videos_with_captions
-                        )
-                except Exception as e:
-                    logger.warning(f"⚠️ Lyrics analysis failed for {artist_name}: {e}")
-            
-            # Phase 4: Create enriched artist data
+            # Phase 3: Create enriched artist data (lyrics analysis now handled by V2 enrichment agent)
             enriched_artist = EnrichedArtistData(
                 profile=enriched_profile,
-                videos=[VideoMetadata(**video) for video in videos_with_captions],
-                lyric_analyses=lyric_analyses,
+                videos=[],  # No longer collecting videos with captions since V2 handles lyrics via Firecrawl
+                lyric_analyses=[],  # No longer using YouTube caption-based analysis
                 enrichment_score=enriched_profile.enrichment_score,
                 discovery_session_id=session_id
             )
             
-            # Phase 5: Store in database
+            # Phase 4: Store in database
             await self.storage_agent.store_artist_profile(deps, enriched_artist.profile)
             
             logger.info(f"🎨 Artist processing completed: {artist_name} (score: {enriched_profile.enrichment_score:.2f})")
@@ -1061,3 +1069,80 @@ class DiscoveryOrchestrator:
                 "status": "error",
                 "message": str(e)
             }
+
+    def _is_artist_name_english(self, name: str) -> bool:
+        """Check if artist name contains only English characters"""
+        if not name:
+            return False
+            
+        # Allow English letters, numbers, spaces, and common punctuation
+        english_pattern = re.compile(r'^[a-zA-Z0-9\s\.,&\'-]+$')
+        return bool(english_pattern.match(name.strip()))
+    
+    def _extract_social_urls_from_videos(self, channel_data: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+        """Extract Instagram and Spotify URLs from YouTube video descriptions"""
+        instagram_url = None
+        spotify_url = None
+        
+        try:
+            # Check recent videos for social media URLs in descriptions
+            recent_videos = channel_data.get('videos', [])
+            if not recent_videos:
+                # Try alternate video data structure
+                recent_videos = channel_data.get('recent_videos', [])
+            
+            for video in recent_videos:
+                description = video.get('description', '')
+                if not description:
+                    continue
+                
+                # Extract Instagram URLs
+                if not instagram_url:
+                    instagram_match = re.search(
+                        r'(?:https?://)?(?:www\.)?instagram\.com/([a-zA-Z0-9_\.]+)/?',
+                        description,
+                        re.IGNORECASE
+                    )
+                    if instagram_match:
+                        username = instagram_match.group(1)
+                        instagram_url = f"https://instagram.com/{username}"
+                        logger.info(f"🔗 Found Instagram URL in video description: {instagram_url}")
+                
+                # Extract Spotify URLs
+                if not spotify_url:
+                    spotify_match = re.search(
+                        r'(?:https?://)?(?:open\.)?spotify\.com/(artist|track|album)/([a-zA-Z0-9]+)',
+                        description,
+                        re.IGNORECASE
+                    )
+                    if spotify_match:
+                        spotify_type = spotify_match.group(1)
+                        spotify_id = spotify_match.group(2)
+                        if spotify_type == 'artist':
+                            spotify_url = f"https://open.spotify.com/artist/{spotify_id}"
+                            logger.info(f"🎵 Found Spotify artist URL in video description: {spotify_url}")
+                        
+                # Stop if we found both
+                if instagram_url and spotify_url:
+                    break
+                    
+        except Exception as e:
+            logger.warning(f"Error extracting social URLs from video descriptions: {e}")
+        
+        return instagram_url, spotify_url
+    
+    def _extract_instagram_handle(self, instagram_url: str) -> Optional[str]:
+        """Extract Instagram handle from URL"""
+        if not instagram_url:
+            return None
+        
+        match = re.search(r'instagram\.com/([a-zA-Z0-9_\.]+)', instagram_url)
+        return match.group(1) if match else None
+    
+    def _extract_spotify_id_from_url(self, spotify_url: str) -> Optional[str]:
+        """Extract Spotify artist ID from URL"""
+        if not spotify_url:
+            return None
+        
+        match = re.search(r'spotify\.com/artist/([a-zA-Z0-9]+)', spotify_url)
+        return match.group(1) if match else None
