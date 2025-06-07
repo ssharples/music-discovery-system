@@ -5,6 +5,7 @@ from fastapi.responses import RedirectResponse
 from contextlib import asynccontextmanager
 import asyncio
 import logging
+import os
 try:
     import sentry_sdk
     from sentry_sdk.integrations.fastapi import FastApiIntegration
@@ -177,40 +178,14 @@ async def detailed_health_check():
 
 @app.get("/debug/firecrawl")
 async def debug_firecrawl():
-    """Debug endpoint to test Firecrawl initialization"""
-    try:
-        # Import with error handling
-        try:
-            from firecrawl import FirecrawlApp
-            firecrawl_available = True
-        except ImportError as e:
-            firecrawl_available = False
-            import_error = str(e)
-        
-        from app.core.config import settings
-        
-        # Check API key
-        api_key_configured = bool(settings.FIRECRAWL_API_KEY)
-        api_key_length = len(settings.FIRECRAWL_API_KEY) if settings.FIRECRAWL_API_KEY else 0
-        
-        result = {
-            "firecrawl_library_available": firecrawl_available,
-            "firecrawl_api_key_configured": api_key_configured,
-            "firecrawl_api_key_length": api_key_length,
-            "status": "debug_endpoint_working"
-        }
-        
-        if not firecrawl_available:
-            result["import_error"] = import_error
-            
-        return result
-        
-    except Exception as e:
-        return {
-            "error": str(e),
-            "error_type": type(e).__name__,
-            "status": "debug_endpoint_error"
-        }
+    """Debug endpoint to check Firecrawl configuration"""
+    return {
+        "firecrawl_api_key_exists": bool(os.environ.get("FIRECRAWL_API_KEY")),
+        "firecrawl_api_key_length": len(os.environ.get("FIRECRAWL_API_KEY", "")),
+        "all_env_vars": {k: "***" if "key" in k.lower() or "secret" in k.lower() or "token" in k.lower() else v 
+                        for k, v in os.environ.items() if "FIRECRAWL" in k or "FIRE" in k},
+        "status": "simple_check"
+    }
 
 # Add global exception handler
 @app.exception_handler(Exception)
