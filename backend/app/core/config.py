@@ -7,26 +7,25 @@ import os
 class Settings(BaseSettings):
     """Application settings"""
     # API Keys (optional for basic deployment)
-    YOUTUBE_API_KEY: str = Field("", env="YOUTUBE_API_KEY")
+    YOUTUBE_API_KEY: str = Field("", env="YOUTUBE_API_KEY")  # Keeping for fallback/comparison
     SPOTIFY_CLIENT_ID: str = Field("", env="SPOTIFY_CLIENT_ID")
     SPOTIFY_CLIENT_SECRET: str = Field("", env="SPOTIFY_CLIENT_SECRET")
     DEEPSEEK_API_KEY: str = Field("", env="DEEPSEEK_API_KEY")
-    FIRECRAWL_API_KEY: str = Field("", env="FIRECRAWL_API_KEY")
     
     # Enhanced AI Provider Keys
     OPENAI_API_KEY: str = Field("", env="OPENAI_API_KEY")
     ANTHROPIC_API_KEY: str = Field("", env="ANTHROPIC_API_KEY")
     
-    # Apify Configuration (for YouTube scraping)
-    APIFY_API_TOKEN: str = Field("", env="APIFY_API_TOKEN")
-    APIFY_ACTOR_TIMEOUT: int = Field(600, env="APIFY_ACTOR_TIMEOUT")  # 10 minutes
-    APIFY_HTTP_TIMEOUT: int = Field(180, env="APIFY_HTTP_TIMEOUT")    # 3 minutes
-    APIFY_MAX_RETRIES: int = Field(3, env="APIFY_MAX_RETRIES")
+    # Instagram/TikTok Authentication (for Crawl4AI session storage)
+    INSTAGRAM_SESSION_FILE: str = Field("instagram_session.json", env="INSTAGRAM_SESSION_FILE")
+    TIKTOK_SESSION_FILE: str = Field("tiktok_session.json", env="TIKTOK_SESSION_FILE")
+    MUSIXMATCH_SESSION_FILE: str = Field("musixmatch_session.json", env="MUSIXMATCH_SESSION_FILE")
     
-    # Firecrawl Configuration
-    FIRECRAWL_API_URL: str = Field("https://api.firecrawl.dev", env="FIRECRAWL_API_URL")
-    FIRECRAWL_TIMEOUT: int = Field(30000, env="FIRECRAWL_TIMEOUT")
-    FIRECRAWL_MAX_RETRIES: int = Field(3, env="FIRECRAWL_MAX_RETRIES")
+    # Crawl4AI Configuration
+    CRAWL4AI_HEADLESS: bool = Field(True, env="CRAWL4AI_HEADLESS")
+    CRAWL4AI_VIEWPORT_WIDTH: int = Field(1920, env="CRAWL4AI_VIEWPORT_WIDTH")
+    CRAWL4AI_VIEWPORT_HEIGHT: int = Field(1080, env="CRAWL4AI_VIEWPORT_HEIGHT")
+    CRAWL4AI_MAX_CONCURRENT: int = Field(5, env="CRAWL4AI_MAX_CONCURRENT")
     
     # Supabase (optional for basic deployment)
     SUPABASE_URL: str = Field("", env="SUPABASE_URL")
@@ -52,8 +51,8 @@ class Settings(BaseSettings):
     SPOTIFY_RATE_LIMIT: int = Field(180, env="SPOTIFY_RATE_LIMIT")  # per 30 seconds
     
     # Discovery Settings
-    MAX_DISCOVERY_RESULTS: int = Field(100, env="MAX_DISCOVERY_RESULTS")
-    DISCOVERY_BATCH_SIZE: int = Field(10, env="DISCOVERY_BATCH_SIZE")
+    MAX_DISCOVERY_RESULTS: int = Field(1000, env="MAX_DISCOVERY_RESULTS")  # Increased for Crawl4AI
+    DISCOVERY_BATCH_SIZE: int = Field(50, env="DISCOVERY_BATCH_SIZE")  # Increased batch size
     
     # Monitoring
     SENTRY_DSN: Optional[str] = Field(None, env="SENTRY_DSN")
@@ -99,10 +98,6 @@ class Settings(BaseSettings):
         """Check if DeepSeek API is properly configured"""
         return bool(self.DEEPSEEK_API_KEY)
     
-    def is_firecrawl_configured(self) -> bool:
-        """Check if Firecrawl API is properly configured"""
-        return bool(self.FIRECRAWL_API_KEY)
-    
     def is_openai_configured(self) -> bool:
         """Check if OpenAI API is properly configured"""
         return bool(self.OPENAI_API_KEY)
@@ -110,10 +105,6 @@ class Settings(BaseSettings):
     def is_anthropic_configured(self) -> bool:
         """Check if Anthropic API is properly configured"""
         return bool(self.ANTHROPIC_API_KEY)
-    
-    def is_apify_configured(self) -> bool:
-        """Check if Apify API is properly configured"""
-        return bool(self.APIFY_API_TOKEN)
     
     def get_available_ai_providers(self) -> List[str]:
         """Get list of configured AI providers"""

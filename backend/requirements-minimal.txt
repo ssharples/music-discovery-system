@@ -24,4 +24,4 @@ asyncpg
 python-jose[cryptography]
 passlib[bcrypt]
 email-validator
-firecrawl-py==2.8.0
+crawl4ai

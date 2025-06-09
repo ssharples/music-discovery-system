@@ -11,6 +11,7 @@ import httpx
 import json
 from datetime import datetime
 import asyncio
+from app.agents.crawl4ai_agent import Crawl4AIAgent
 
 from app.core.config import settings
 
@@ -40,6 +41,9 @@ class ApifyYouTubeAgent:
         self.actor_timeout = settings.APIFY_ACTOR_TIMEOUT
         self.http_timeout = settings.APIFY_HTTP_TIMEOUT
         self.max_retries = settings.APIFY_MAX_RETRIES
+        
+        # Initialize Crawl4AI agent for enhanced social media discovery
+        self.crawl4ai_agent = Crawl4AIAgent()
         
         if not self.apify_api_token:
             logger.warning("APIFY_API_TOKEN not set - Apify YouTube scraping will be disabled")
@@ -974,7 +978,7 @@ class ApifyYouTubeAgent:
     
     async def discover_social_media_urls(self, artist_name: str, channel_title: str = None, description: str = "") -> Dict[str, str]:
         """
-        Discover Instagram and TikTok URLs for an artist by searching video descriptions and generating likely URLs
+        Discover Instagram and TikTok URLs for an artist using Crawl4AI for enhanced validation
         
         Args:
             artist_name: Name of the artist to search for
@@ -1006,23 +1010,54 @@ class ApifyYouTubeAgent:
                 social_urls["validation_score"] += 0.6  # Higher score for found URLs
                 logger.debug(f"✅ Found TikTok in description: {tiktok_url}")
             
-            # If not found in description, try generating likely URLs
-            if not instagram_url or not tiktok_url:
-                search_name = self._clean_artist_name_for_search(artist_name)
-                if search_name:
-                    if not instagram_url:
-                        generated_instagram = await self._generate_likely_instagram_url(search_name)
-                        if generated_instagram:
-                            social_urls["instagram"] = generated_instagram
-                            social_urls["validation_score"] += 0.3  # Lower score for generated URLs
-                            logger.debug(f"🔗 Generated likely Instagram: {generated_instagram}")
+            # Use Crawl4AI for enhanced discovery and validation
+            try:
+                channel_url = f"https://www.youtube.com/channel/{channel_title}" if channel_title else None
+                crawl4ai_results = await self.crawl4ai_agent.discover_artist_social_profiles(
+                    artist_name=artist_name,
+                    channel_url=channel_url
+                )
+                
+                # Update with Crawl4AI results if they have better scores
+                if crawl4ai_results and crawl4ai_results.get("profiles"):
+                    profiles = crawl4ai_results["profiles"]
+                    validation_scores = crawl4ai_results.get("validation_scores", {})
                     
-                    if not tiktok_url:
-                        generated_tiktok = await self._generate_likely_tiktok_url(search_name)
-                        if generated_tiktok:
-                            social_urls["tiktok"] = generated_tiktok
-                            social_urls["validation_score"] += 0.3  # Lower score for generated URLs
-                            logger.debug(f"🔗 Generated likely TikTok: {generated_tiktok}")
+                    # Update Instagram if Crawl4AI found a better match
+                    if profiles.get("instagram") and (not social_urls["instagram"] or validation_scores.get("instagram", 0) > 0.7):
+                        social_urls["instagram"] = profiles["instagram"]
+                        social_urls["validation_score"] = max(social_urls["validation_score"], validation_scores.get("instagram", 0))
+                        logger.debug(f"✅ Crawl4AI found Instagram: {profiles['instagram']} (score: {validation_scores.get('instagram', 0):.2f})")
+                    
+                    # Update TikTok if Crawl4AI found a better match
+                    if profiles.get("tiktok") and (not social_urls["tiktok"] or validation_scores.get("tiktok", 0) > 0.7):
+                        social_urls["tiktok"] = profiles["tiktok"]
+                        social_urls["validation_score"] = max(social_urls["validation_score"], validation_scores.get("tiktok", 0))
+                        logger.debug(f"✅ Crawl4AI found TikTok: {profiles['tiktok']} (score: {validation_scores.get('tiktok', 0):.2f})")
+                    
+                    # Update overall validation score
+                    if crawl4ai_results.get("overall_validation_score", 0) > social_urls["validation_score"]:
+                        social_urls["validation_score"] = crawl4ai_results["overall_validation_score"]
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Crawl4AI discovery failed, falling back to basic discovery: {str(e)}")
+                # Fall back to the original method if Crawl4AI fails
+                if not instagram_url or not tiktok_url:
+                    search_name = self._clean_artist_name_for_search(artist_name)
+                    if search_name:
+                        if not instagram_url:
+                            generated_instagram = await self._generate_likely_instagram_url(search_name)
+                            if generated_instagram:
+                                social_urls["instagram"] = generated_instagram
+                                social_urls["validation_score"] += 0.3  # Lower score for generated URLs
+                                logger.debug(f"🔗 Generated likely Instagram: {generated_instagram}")
+                        
+                        if not tiktok_url:
+                            generated_tiktok = await self._generate_likely_tiktok_url(search_name)
+                            if generated_tiktok:
+                                social_urls["tiktok"] = generated_tiktok
+                                social_urls["validation_score"] += 0.3  # Lower score for generated URLs
+                                logger.debug(f"🔗 Generated likely TikTok: {generated_tiktok}")
             
             # Additional validation if channel title is provided
             if channel_title and (social_urls["instagram"] or social_urls["tiktok"]):
