@@ -30,11 +30,7 @@ class Crawl4AIEnrichmentAgent:
         self.browser_config = BrowserConfig(
             headless=True,
             viewport_width=1920,
-            viewport_height=1080,
-            extra_headers={
-                "Accept-Language": "en-US,en;q=0.9",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
+            viewport_height=1080
         )
         
         # DeepSeek agent for lyrics analysis
@@ -103,23 +99,33 @@ class Crawl4AIEnrichmentAgent:
             
             logger.info(f"🎵 Crawling Spotify: {spotify_url}")
             
-            # Schema for Spotify artist page
+            # Enhanced schema for Spotify artist page with current selectors
             schema = {
                 "name": "Spotify Artist",
                 "fields": [
                     {
                         "name": "artist_name",
-                        "selector": "h1[data-testid='artist-name']",
+                        "selector": "h1[data-testid='artist-name'], h1[data-testid='entityTitle'], .Type__TypeElement-goli40-0.glAFHu, .encore-text-headline-large, [data-testid='top-element'] h1",
                         "type": "text"
                     },
                     {
                         "name": "monthly_listeners",
-                        "selector": "div[data-testid='monthly-listeners']",
+                        "selector": "div[data-testid='monthly-listeners'], .Type__TypeElement-goli40-0.kHXWsL, .monthly-listeners-label, span[data-testid='monthly-listeners-label']",
                         "type": "text"
                     },
                     {
                         "name": "bio",
-                        "selector": "div[data-testid='artist-biography']",
+                        "selector": "div[data-testid='artist-biography'], [data-testid='about-artist'], .about-artist-text, .Type__TypeElement-goli40-0.isTruncated",
+                        "type": "text"
+                    },
+                    {
+                        "name": "verified",
+                        "selector": "[data-testid='verified-badge'], .verified-badge, .artist-verified",
+                        "type": "text"
+                    },
+                    {
+                        "name": "follower_count",
+                        "selector": "[data-testid='follower-count'], .follower-count-label, .Type__TypeElement-goli40-0.kHXWsL",
                         "type": "text"
                     }
                 ]
@@ -130,7 +136,7 @@ class Crawl4AIEnrichmentAgent:
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
                 extraction_strategy=extraction_strategy,
-                wait_for="css:h1[data-testid='artist-name']",
+                wait_for="css:h1[data-testid='artist-name'], css:h1[data-testid='entityTitle'], css:.encore-text-headline-large",
                 js_code="""
                 // Scroll to load tracks
                 window.scrollTo(0, 1000);
@@ -178,19 +184,29 @@ class Crawl4AIEnrichmentAgent:
             search_url = f"https://open.spotify.com/search/{artist_name.replace(' ', '%20')}/artists"
             logger.info(f"🔍 Searching Spotify for: {artist_name}")
             
-            # Schema for search results
+            # Enhanced schema for Spotify search results with current selectors
             schema = {
                 "name": "Spotify Search",
-                "baseSelector": "div[data-testid='search-result-artist']",
+                "baseSelector": "div[data-testid='search-result-artist'], .artist-search-result, .search-result-item, .ContentItem__Container-sc-1qzj7v0-0",
                 "fields": [
                     {
                         "name": "artist_url",
-                        "selector": "a",
+                        "selector": "a, .artist-link, [data-testid='card-click-handler']",
                         "attribute": "href"
                     },
                     {
                         "name": "artist_name",
-                        "selector": "a",
+                        "selector": "a, .artist-name, .Type__TypeElement-goli40-0, .encore-text-title-small",
+                        "type": "text"
+                    },
+                    {
+                        "name": "verified",
+                        "selector": "[data-testid='verified-badge'], .verified-badge",
+                        "type": "text"
+                    },
+                    {
+                        "name": "follower_count",
+                        "selector": ".follower-count, .Type__TypeElement-goli40-0.kHXWsL",
                         "type": "text"
                     }
                 ]
@@ -231,18 +247,53 @@ class Crawl4AIEnrichmentAgent:
             logger.error(f"❌ Spotify search error: {str(e)}")
     
     async def _enrich_instagram(self, instagram_url: str, enriched_data: EnrichedArtistData):
-        """Enrich with Instagram data using authenticated scraping"""
+        """Enrich with Instagram data using multiple extraction strategies"""
         try:
             logger.info(f"📸 Crawling Instagram: {instagram_url}")
             
-            # Instagram requires authentication for full data
-            # For now, we'll do basic scraping
+            # Enhanced schema for Instagram data extraction with current selectors
+            schema = {
+                "name": "Instagram Profile",
+                "fields": [
+                    {
+                        "name": "username",
+                        "selector": "h2, h1, [data-testid='user-title'], .x1lliihq.x1plvlek.xryxfnj.x1n2onr6.x193iq5w.xeuugli.x1fj9vlw.x13faqbe.x1vvkbs.x1s928wv.xhkezso.x1gmr53x.x1cpjm7i.x1fgarty.x1943h6x.x1i0vuye.xvs91rp.xo1l8bm.x5n08af.x10wh9bi.x1wdrske.x8viiok.x18hxmgj",
+                        "type": "text"
+                    },
+                    {
+                        "name": "bio", 
+                        "selector": "[data-testid='user-biography'], .-vDIg span, .biography span, .x7a106z.x972fbf.xcfux6l.x1qhh985.xm0m39n.x9f619.x78zum5.xdt5ytf.x2lah0s.xdj266r.x11i5rnm.xat24cr.x1mh8g0r.xexx8yu.x4uap5.x18d9i69.xkhd6sd.x1n2onr6.x11njtxf",
+                        "type": "text"
+                    },
+                    {
+                        "name": "follower_count_text",
+                        "selector": "a[href*='followers/'] span, .-nal3 span, .follower span, .x1i10hfl.xjbqb8w.x6umtig.x1b1mbwd.xaqea5y.xav7gou.x9f619.x1ypdohk.xe8uvvx.xdj266r.x11i5rnm.xat24cr.x1mh8g0r.xexx8yu.x4uap5.x18d9i69.xkhd6sd.x16tdsg8.x1hl2dhg.xggy1nq.x1a2a7pz.x1heor9g.x1sur9pj.xkrqix3.x1lliihq.x5n08af.x193iq5w.x1n2onr6.xeuugli",
+                        "type": "text"
+                    },
+                    {
+                        "name": "posts_count",
+                        "selector": "[data-testid='user-posts-count'], .posts-count, .x1i10hfl.xjbqb8w.x6umtig.x1b1mbwd.xaqea5y.xav7gou.x9f619.x1ypdohk.xe8uvvx.xdj266r.x11i5rnm.xat24cr.x1mh8g0r.xexx8yu.x4uap5.x18d9i69.xkhd6sd.x16tdsg8.x1hl2dhg.xggy1nq.x1a2a7pz.x1heor9g.x1sur9pj.xkrqix3.x1lliihq.x5n08af.x193iq5w.x1n2onr6.xeuugli span",
+                        "type": "text"
+                    },
+                    {
+                        "name": "following_count",
+                        "selector": "a[href*='following/'] span, .following-count, .-nal3 span",
+                        "type": "text"
+                    }
+                ]
+            }
+            
+            extraction_strategy = JsonCssExtractionStrategy(schema)
+            
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
-                wait_for="css:header",
+                extraction_strategy=extraction_strategy,
+                wait_for="css:header, css:main, css:h1, css:[data-testid='user-title']",
                 js_code="""
-                // Wait for page load
+                // Wait for page load and scroll slightly to trigger content
                 await new Promise(resolve => setTimeout(resolve, 3000));
+                window.scrollTo(0, 300);
+                await new Promise(resolve => setTimeout(resolve, 2000));
                 """
             )
             
@@ -253,31 +304,109 @@ class Crawl4AIEnrichmentAgent:
                 )
                 
                 if result.success:
-                    # Extract follower count from meta tags or JSON data
-                    followers_match = re.search(r'"edge_followed_by":\{"count":(\d+)\}', result.html)
-                    if followers_match:
-                        enriched_data.instagram_followers = int(followers_match.group(1))
+                    # Try structured extraction first
+                    if result.extracted_content:
+                        try:
+                            instagram_data = json.loads(result.extracted_content)
+                            if instagram_data.get('follower_count_text'):
+                                enriched_data.instagram_followers = self._parse_number(instagram_data['follower_count_text'])
+                        except:
+                            pass
+                    
+                    # Fallback to regex patterns from HTML
+                    if not enriched_data.instagram_followers:
+                        # Multiple patterns for Instagram data with enhanced validation
+                        patterns = [
+                            r'"edge_followed_by":\{"count":(\d+)\}',  # GraphQL API
+                            r'"follower_count":(\d+)',  # Alternative API
+                            r'([\d,.]+[KMB]?)\s*[Ff]ollowers?',  # Text pattern
+                            r'(\d{1,3}(?:,\d{3})*)\s*followers?',  # Exact number pattern
+                            r'"edge_follow":\{"count":(\d+)\}',  # Alternative GraphQL
+                            r'content="([^"]+) Followers',  # Meta tag pattern
+                        ]
+                        
+                        for pattern in patterns:
+                            matches = re.findall(pattern, result.html, re.IGNORECASE)
+                            if matches:
+                                try:
+                                    # Take the first match that's reasonable
+                                    for match in matches:
+                                        if pattern.startswith('"'):  # JSON patterns
+                                            follower_count = int(match)
+                                        else:  # Text patterns
+                                            follower_count = self._parse_number(match)
+                                        
+                                        # Validate reasonable follower count (not too low/high)
+                                        if 0 < follower_count < 1000000000:  # Max 1B followers
+                                            enriched_data.instagram_followers = follower_count
+                                            break
+                                    
+                                    if enriched_data.instagram_followers:
+                                        break
+                                except (ValueError, TypeError):
+                                    continue
+                    
+                    if enriched_data.instagram_followers:
                         logger.info(f"✅ Instagram followers: {enriched_data.instagram_followers:,}")
                     else:
-                        # Try alternative pattern
-                        followers_text_match = re.search(r'([\d.]+[KMB]?)\s*[Ff]ollowers', result.html)
-                        if followers_text_match:
-                            enriched_data.instagram_followers = self._parse_number(followers_text_match.group(1))
+                        logger.warning("⚠️ Could not extract Instagram follower count")
                     
         except Exception as e:
             logger.error(f"❌ Instagram enrichment error: {str(e)}")
     
     async def _enrich_tiktok(self, tiktok_url: str, enriched_data: EnrichedArtistData):
-        """Enrich with TikTok data"""
+        """Enrich with TikTok data using robust extraction"""
         try:
             logger.info(f"🎭 Crawling TikTok: {tiktok_url}")
             
+            # Enhanced schema for TikTok data extraction with current selectors
+            schema = {
+                "name": "TikTok Profile",
+                "fields": [
+                    {
+                        "name": "username",
+                        "selector": "h1, h2, [data-e2e='user-title'], [data-e2e='user-subtitle'], .share-title-container h1, .user-title",
+                        "type": "text"
+                    },
+                    {
+                        "name": "follower_count_text",
+                        "selector": "[data-e2e='followers-count'], .count-infra, [title*='Followers'], .number[title*='Followers'], .tiktok-counter strong",
+                        "type": "text"
+                    },
+                    {
+                        "name": "likes_count_text", 
+                        "selector": "[data-e2e='likes-count'], .likes-count, [title*='Likes'], .number[title*='Likes'], .tiktok-counter strong",
+                        "type": "text"
+                    },
+                    {
+                        "name": "following_count_text",
+                        "selector": "[data-e2e='following-count'], .following-count, [title*='Following'], .number[title*='Following']",
+                        "type": "text"
+                    },
+                    {
+                        "name": "bio",
+                        "selector": "[data-e2e='user-bio'], .bio-text, .user-bio, .share-desc-container",
+                        "type": "text"
+                    },
+                    {
+                        "name": "verified",
+                        "selector": "[data-e2e='user-verified'], .user-verified, .verified-icon",
+                        "type": "text"
+                    }
+                ]
+            }
+            
+            extraction_strategy = JsonCssExtractionStrategy(schema)
+            
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
-                wait_for="css:h2[data-e2e='user-subtitle']",
+                extraction_strategy=extraction_strategy,
+                wait_for="css:h1, css:h2, css:[data-e2e='user-title'], css:.user-title, css:.share-title-container",
                 js_code="""
-                // Wait for page load
-                await new Promise(resolve => setTimeout(resolve, 3000));
+                // Wait for page load and try to trigger any lazy loading
+                await new Promise(resolve => setTimeout(resolve, 4000));
+                window.scrollTo(0, 500);
+                await new Promise(resolve => setTimeout(resolve, 2000));
                 """
             )
             
@@ -288,25 +417,75 @@ class Crawl4AIEnrichmentAgent:
                 )
                 
                 if result.success:
-                    # Extract follower count
-                    followers_match = re.search(r'([\d.]+[KMB]?)\s*[Ff]ollowers', result.html)
-                    if followers_match:
-                        enriched_data.tiktok_followers = self._parse_number(followers_match.group(1))
+                    # Try structured extraction first
+                    if result.extracted_content:
+                        try:
+                            tiktok_data = json.loads(result.extracted_content)
+                            if tiktok_data.get('follower_count_text'):
+                                enriched_data.tiktok_followers = self._parse_number(tiktok_data['follower_count_text'])
+                            if tiktok_data.get('likes_count_text'):
+                                enriched_data.tiktok_likes = self._parse_number(tiktok_data['likes_count_text'])
+                        except:
+                            pass
                     
-                    # Extract total likes
-                    likes_match = re.search(r'([\d.]+[KMB]?)\s*[Ll]ikes', result.html)
-                    if likes_match:
-                        enriched_data.tiktok_likes = self._parse_number(likes_match.group(1))
+                    # Fallback to regex patterns from HTML
+                    if not enriched_data.tiktok_followers or not enriched_data.tiktok_likes:
+                        # Multiple patterns for TikTok data
+                        follower_patterns = [
+                            r'"followerCount":(\d+)',  # JSON API
+                            r'"stats":\{"followerCount":(\d+)',  # Alternative API
+                            r'([\d,.]+[KMB]?)\s*[Ff]ollowers?',  # Text pattern
+                            r'(\d{1,3}(?:,\d{3})*)\s*followers',  # Exact number
+                        ]
+                        
+                        likes_patterns = [
+                            r'"heartCount":(\d+)',  # JSON API
+                            r'"stats":\{"heartCount":(\d+)',  # Alternative API  
+                            r'([\d,.]+[KMB]?)\s*[Ll]ikes?',  # Text pattern
+                            r'(\d{1,3}(?:,\d{3})*)\s*likes',  # Exact number
+                        ]
+                        
+                        # Extract followers
+                        if not enriched_data.tiktok_followers:
+                            for pattern in follower_patterns:
+                                match = re.search(pattern, result.html, re.IGNORECASE)
+                                if match:
+                                    try:
+                                        if pattern.startswith('"'):  # JSON patterns
+                                            enriched_data.tiktok_followers = int(match.group(1))
+                                        else:  # Text patterns
+                                            enriched_data.tiktok_followers = self._parse_number(match.group(1))
+                                        break
+                                    except ValueError:
+                                        continue
+                        
+                        # Extract likes
+                        if not enriched_data.tiktok_likes:
+                            for pattern in likes_patterns:
+                                match = re.search(pattern, result.html, re.IGNORECASE)
+                                if match:
+                                    try:
+                                        if pattern.startswith('"'):  # JSON patterns
+                                            enriched_data.tiktok_likes = int(match.group(1))
+                                        else:  # Text patterns
+                                            enriched_data.tiktok_likes = self._parse_number(match.group(1))
+                                        break
+                                    except ValueError:
+                                        continue
                     
-                    logger.info(f"✅ TikTok: {enriched_data.tiktok_followers:,} followers, {enriched_data.tiktok_likes:,} likes")
+                    if enriched_data.tiktok_followers or enriched_data.tiktok_likes:
+                        logger.info(f"✅ TikTok: {enriched_data.tiktok_followers or 0:,} followers, {enriched_data.tiktok_likes or 0:,} likes")
+                    else:
+                        logger.warning("⚠️ Could not extract TikTok metrics")
                     
         except Exception as e:
             logger.error(f"❌ TikTok enrichment error: {str(e)}")
     
     async def _enrich_lyrics(self, enriched_data: EnrichedArtistData):
-        """Enrich with lyrics analysis from Musixmatch"""
+        """Enrich with lyrics analysis from multiple sources"""
         try:
             if not enriched_data.top_tracks:
+                logger.info("No top tracks available for lyrics analysis")
                 return
             
             lyrics_analyses = []
@@ -315,47 +494,156 @@ class Crawl4AIEnrichmentAgent:
                 track_name = track.get('name', '')
                 artist_name = enriched_data.name
                 
-                # Format for Musixmatch URL
-                clean_artist = re.sub(r'[^a-zA-Z0-9\s]', '', artist_name).replace(' ', '-').lower()
-                clean_track = re.sub(r'[^a-zA-Z0-9\s]', '', track_name).replace(' ', '-').lower()
+                if not track_name or not artist_name:
+                    continue
                 
-                musixmatch_url = f"https://www.musixmatch.com/lyrics/{clean_artist}/{clean_track}"
+                logger.info(f"🎤 Getting lyrics for: {track_name} by {artist_name}")
                 
-                logger.info(f"🎤 Getting lyrics for: {track_name}")
+                # Try multiple lyrics sources
+                lyrics_text = await self._get_lyrics_from_sources(artist_name, track_name)
                 
-                crawler_config = CrawlerRunConfig(
-                    cache_mode=CacheMode.BYPASS,
-                    wait_for="css:.lyrics__content",
-                    js_code="""
-                    // Wait for lyrics to load
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                    """
-                )
-                
-                async with AsyncWebCrawler(config=self.browser_config) as crawler:
-                    result = await crawler.arun(
-                        url=musixmatch_url,
-                        config=crawler_config
-                    )
-                    
-                    if result.success:
-                        # Extract lyrics text
-                        lyrics_match = re.search(r'<span class="lyrics__content[^"]*">([^<]+)</span>', result.html)
-                        if lyrics_match:
-                            lyrics_text = lyrics_match.group(1)
-                            
-                            # Analyze lyrics with DeepSeek
-                            analysis = await self._analyze_lyrics(lyrics_text, track_name)
-                            if analysis:
-                                lyrics_analyses.append(analysis)
+                if lyrics_text:
+                    # Analyze lyrics with DeepSeek
+                    analysis = await self._analyze_lyrics(lyrics_text, track_name)
+                    if analysis:
+                        lyrics_analyses.append(analysis)
+                        logger.info(f"✅ Analyzed lyrics for: {track_name}")
+                else:
+                    logger.warning(f"⚠️ Could not find lyrics for: {track_name}")
             
             # Combine analyses
             if lyrics_analyses:
                 enriched_data.lyrics_themes = self._combine_lyrics_analyses(lyrics_analyses)
                 logger.info(f"✅ Lyrics analysis complete: {enriched_data.lyrics_themes}")
+            else:
+                logger.warning("⚠️ No lyrics analyses available")
                 
         except Exception as e:
             logger.error(f"❌ Lyrics enrichment error: {str(e)}")
+    
+    async def _get_lyrics_from_sources(self, artist_name: str, track_name: str) -> str:
+        """Try to get lyrics from multiple sources"""
+        # Clean names for URL formatting
+        clean_artist = re.sub(r'[^a-zA-Z0-9\s]', '', artist_name).replace(' ', '-').lower()
+        clean_track = re.sub(r'[^a-zA-Z0-9\s]', '', track_name).replace(' ', '-').lower()
+        
+        # Try Musixmatch first
+        lyrics_text = await self._get_musixmatch_lyrics(clean_artist, clean_track)
+        
+        if not lyrics_text:
+            # Try Genius as backup
+            lyrics_text = await self._get_genius_lyrics(clean_artist, clean_track)
+        
+        return lyrics_text
+    
+    async def _get_musixmatch_lyrics(self, clean_artist: str, clean_track: str) -> str:
+        """Extract lyrics from Musixmatch"""
+        try:
+            musixmatch_url = f"https://www.musixmatch.com/lyrics/{clean_artist}/{clean_track}"
+            
+            # Enhanced schema for Musixmatch lyrics extraction with current selectors
+            schema = {
+                "name": "Musixmatch Lyrics",
+                "fields": [
+                    {
+                        "name": "lyrics_content",
+                        "selector": ".lyrics__content__ok span, .lyrics__content span, .mxm-lyrics span, [data-testid='lyrics-line'], .lyrics-line-text, .col-sm-10.col-md-8.col-ml-3.col-lg-6 p",
+                        "type": "list"
+                    },
+                    {
+                        "name": "song_title",
+                        "selector": "h1, .mxm-track-title h1, .mxm-track-title, [data-testid='track-title'], .track-title",
+                        "type": "text"
+                    },
+                    {
+                        "name": "artist_name",
+                        "selector": ".mxm-track-subtitle a, [data-testid='artist-name'], .artist-name, .track-artist",
+                        "type": "text"
+                    }
+                ]
+            }
+            
+            extraction_strategy = JsonCssExtractionStrategy(schema)
+            
+            crawler_config = CrawlerRunConfig(
+                cache_mode=CacheMode.BYPASS,
+                extraction_strategy=extraction_strategy,
+                wait_for="css:.lyrics__content, css:.mxm-lyrics, css:[data-testid='lyrics-line'], css:.lyrics-line-text",
+                js_code="""
+                // Wait for lyrics to load and handle any overlays
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                
+                // Try to close any modal/overlay
+                const closeButtons = document.querySelectorAll('[data-testid="modal-close"], .close-btn, .modal-close');
+                closeButtons.forEach(btn => btn.click());
+                
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                """
+            )
+            
+            async with AsyncWebCrawler(config=self.browser_config) as crawler:
+                result = await crawler.arun(
+                    url=musixmatch_url,
+                    config=crawler_config
+                )
+                
+                if result.success:
+                    # Try structured extraction
+                    if result.extracted_content:
+                        try:
+                            lyrics_data = json.loads(result.extracted_content)
+                            if lyrics_data.get('lyrics_content'):
+                                return ' '.join(lyrics_data['lyrics_content'])
+                        except:
+                            pass
+                    
+                    # Fallback to regex extraction
+                    lyrics_patterns = [
+                        r'<span class="lyrics__content[^"]*">([^<]+)</span>',
+                        r'<span[^>]*lyrics[^>]*>([^<]+)</span>',
+                        r'"lyrics":"([^"]+)"',
+                    ]
+                    
+                    for pattern in lyrics_patterns:
+                        matches = re.findall(pattern, result.html, re.DOTALL | re.IGNORECASE)
+                        if matches:
+                            return ' '.join(matches)[:2000]  # Limit length
+                            
+        except Exception as e:
+            logger.debug(f"Musixmatch extraction failed: {e}")
+        
+        return None
+    
+    async def _get_genius_lyrics(self, clean_artist: str, clean_track: str) -> str:
+        """Extract lyrics from Genius as backup"""
+        try:
+            genius_url = f"https://genius.com/{clean_artist}-{clean_track}-lyrics"
+            
+            crawler_config = CrawlerRunConfig(
+                cache_mode=CacheMode.BYPASS,
+                wait_for="css:[data-lyrics-container], css:.lyrics",
+                js_code="""
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                """
+            )
+            
+            async with AsyncWebCrawler(config=self.browser_config) as crawler:
+                result = await crawler.arun(
+                    url=genius_url,
+                    config=crawler_config
+                )
+                
+                if result.success:
+                    # Extract lyrics from Genius
+                    lyrics_pattern = r'<div[^>]*data-lyrics-container[^>]*>([^<]+)</div>'
+                    match = re.search(lyrics_pattern, result.html, re.DOTALL)
+                    if match:
+                        return match.group(1).strip()[:2000]
+                        
+        except Exception as e:
+            logger.debug(f"Genius extraction failed: {e}")
+        
+        return None
     
     async def _analyze_lyrics(self, lyrics: str, track_name: str) -> Dict[str, Any]:
         """Analyze lyrics using DeepSeek"""
@@ -523,14 +811,212 @@ class Crawl4AIEnrichmentAgent:
         return min(max(score, 0), 100)
     
     def _calculate_enrichment_score(self, data: EnrichedArtistData) -> float:
-        """Calculate how complete the enrichment is"""
-        fields_populated = sum([
-            bool(data.spotify_monthly_listeners),
-            bool(data.instagram_followers),
-            bool(data.tiktok_followers),
-            bool(data.top_tracks),
-            bool(data.bio),
-            bool(data.lyrics_themes)
-        ])
+        """Calculate a 0-1 score representing data completeness"""
+        score = 0.0
+        total_fields = 0
         
-        return fields_populated / 6.0 
+        # Spotify data (30% weight)
+        if data.spotify_monthly_listeners is not None:
+            score += 0.15
+        if data.top_tracks:
+            score += 0.15
+        total_fields += 2
+        
+        # Social media data (40% weight)
+        if data.instagram_followers is not None:
+            score += 0.20
+        if data.tiktok_followers is not None:
+            score += 0.10
+        if data.tiktok_likes is not None:
+            score += 0.10
+        total_fields += 3
+        
+        # Content analysis (30% weight)
+        if data.lyrics_themes:
+            score += 0.20
+        if data.genres:
+            score += 0.10
+        total_fields += 2
+        
+        return min(score, 1.0)
+    
+    def get_cost_estimate(self, artist_profile: ArtistProfile) -> Dict[str, Any]:
+        """
+        Estimate the cost of enriching an artist profile
+        
+        Args:
+            artist_profile: The artist profile to enrich
+            
+        Returns:
+            Dictionary with cost breakdown and estimates
+        """
+        # Crawl4AI is completely free - no API costs
+        tasks = []
+        
+        # Count expected scraping tasks
+        if artist_profile.spotify_url or artist_profile.spotify_id:
+            tasks.append("Spotify artist page")
+        else:
+            tasks.append("Spotify search + artist page")
+        
+        if artist_profile.instagram_url:
+            tasks.append("Instagram profile")
+        
+        if artist_profile.tiktok_url:
+            tasks.append("TikTok profile")
+        
+        # Add lyrics scraping tasks
+        tasks.extend(["Musixmatch lyrics (up to 3 songs)", "Genius lyrics (backup)"])
+        
+        # DeepSeek API cost for lyrics analysis (only real cost)
+        lyrics_analysis_cost = 0.002  # ~$0.002 per analysis
+        total_deepseek_cost = lyrics_analysis_cost * 3  # Up to 3 songs
+        
+        return {
+            "total_cost_usd": total_deepseek_cost,
+            "cost_breakdown": {
+                "crawl4ai_scraping": 0.00,  # Completely free
+                "deepseek_lyrics_analysis": total_deepseek_cost,
+            },
+            "estimated_duration_seconds": len(tasks) * 3,  # ~3 seconds per task
+            "scraping_tasks": tasks,
+            "cost_comparison": {
+                "vs_firecrawl": f"${0.05 * len(tasks):.3f} saved",  # Firecrawl was ~$0.05 per scrape
+                "vs_apify": f"${0.10 * len(tasks):.3f} saved",      # Apify was ~$0.10 per scrape
+            },
+            "notes": [
+                "Crawl4AI scraping is completely free",
+                "Only cost is DeepSeek API for lyrics analysis",
+                "Significant savings compared to paid scraping services",
+                "No rate limits or quotas"
+            ]
+        }
+    
+    async def validate_extraction_schemas(self) -> Dict[str, Any]:
+        """
+        Test the effectiveness of extraction schemas on sample pages
+        
+        Returns:
+            Validation results for each platform
+        """
+        validation_results = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "platforms": {}
+        }
+        
+        # Test URLs for validation (use public profiles that are likely to be stable)
+        test_profiles = {
+            "spotify": "https://open.spotify.com/artist/4q3ewBCX7sLwd24euuV69X",  # Bad Bunny - popular stable profile
+            "instagram": "https://instagram.com/badgalriri",  # Rihanna - stable profile
+            "tiktok": "https://tiktok.com/@charlidamelio",  # Charlie D'Amelio - stable profile
+            "musixmatch": "https://www.musixmatch.com/lyrics/Bad-Bunny/Titi-Me-Pregunto"  # Popular song
+        }
+        
+        logger.info("🧪 Starting extraction schema validation...")
+        
+        # Test each platform
+        for platform, test_url in test_profiles.items():
+            try:
+                logger.info(f"Testing {platform} extraction...")
+                
+                # Use appropriate extraction schema
+                if platform == "spotify":
+                    schema = {
+                        "name": "Spotify Test",
+                        "fields": [
+                            {"name": "artist_name", "selector": "h1[data-testid='artist-name'], h1[data-testid='entityTitle']", "type": "text"},
+                            {"name": "monthly_listeners", "selector": "div[data-testid='monthly-listeners'], .monthly-listeners-label", "type": "text"}
+                        ]
+                    }
+                elif platform == "instagram":
+                    schema = {
+                        "name": "Instagram Test", 
+                        "fields": [
+                            {"name": "username", "selector": "h2, h1, [data-testid='user-title']", "type": "text"},
+                            {"name": "follower_count", "selector": "a[href*='followers/'] span", "type": "text"}
+                        ]
+                    }
+                elif platform == "tiktok":
+                    schema = {
+                        "name": "TikTok Test",
+                        "fields": [
+                            {"name": "username", "selector": "h1, h2, [data-e2e='user-title']", "type": "text"},
+                            {"name": "follower_count", "selector": "[data-e2e='followers-count'], .tiktok-counter strong", "type": "text"}
+                        ]
+                    }
+                elif platform == "musixmatch":
+                    schema = {
+                        "name": "Musixmatch Test",
+                        "fields": [
+                            {"name": "song_title", "selector": "h1, .mxm-track-title", "type": "text"},
+                            {"name": "lyrics", "selector": ".lyrics__content span, [data-testid='lyrics-line']", "type": "list"}
+                        ]
+                    }
+                
+                extraction_strategy = JsonCssExtractionStrategy(schema)
+                
+                crawler_config = CrawlerRunConfig(
+                    cache_mode=CacheMode.BYPASS,
+                    extraction_strategy=extraction_strategy,
+                    wait_for="css:h1, css:h2, css:main",
+                    timeout=10  # Shorter timeout for validation
+                )
+                
+                async with AsyncWebCrawler(config=self.browser_config) as crawler:
+                    result = await crawler.arun(
+                        url=test_url,
+                        config=crawler_config
+                    )
+                    
+                    if result.success:
+                        extracted_data = {}
+                        if result.extracted_content:
+                            try:
+                                extracted_data = json.loads(result.extracted_content)
+                            except:
+                                pass
+                        
+                        # Evaluate extraction quality
+                        fields_extracted = len([k for k, v in extracted_data.items() if v])
+                        total_fields = len(schema["fields"])
+                        success_rate = (fields_extracted / total_fields) * 100 if total_fields > 0 else 0
+                        
+                        validation_results["platforms"][platform] = {
+                            "status": "success" if success_rate > 50 else "partial",
+                            "success_rate": f"{success_rate:.1f}%",
+                            "fields_extracted": fields_extracted,
+                            "total_fields": total_fields,
+                            "extracted_data": extracted_data,
+                            "selectors_tested": len(schema["fields"])
+                        }
+                        
+                        logger.info(f"✅ {platform}: {success_rate:.1f}% extraction success")
+                    else:
+                        validation_results["platforms"][platform] = {
+                            "status": "failed",
+                            "error": result.error_message or "Unknown error",
+                            "success_rate": "0%"
+                        }
+                        logger.warning(f"❌ {platform}: Extraction failed")
+                        
+            except Exception as e:
+                validation_results["platforms"][platform] = {
+                    "status": "error",
+                    "error": str(e),
+                    "success_rate": "0%"
+                }
+                logger.error(f"❌ {platform}: Validation error - {str(e)}")
+        
+        # Calculate overall score
+        success_rates = [
+            float(p.get("success_rate", "0%").replace("%", ""))
+            for p in validation_results["platforms"].values()
+            if p.get("success_rate") != "0%"
+        ]
+        
+        validation_results["overall_score"] = f"{sum(success_rates) / len(success_rates) if success_rates else 0:.1f}%"
+        validation_results["platforms_tested"] = len(test_profiles)
+        validation_results["platforms_successful"] = len([p for p in validation_results["platforms"].values() if p.get("status") == "success"])
+        
+        logger.info(f"🎯 Validation complete: {validation_results['overall_score']} overall success rate")
+        return validation_results 

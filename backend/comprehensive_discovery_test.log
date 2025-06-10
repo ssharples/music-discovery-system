@@ -1,0 +1,274 @@
+2025-06-10 23:23:27,923 - __main__ - INFO - 🎵 Starting Comprehensive Music Discovery System Tests
+2025-06-10 23:23:27,924 - __main__ - INFO - 
+🔧 Testing Environment Setup
+2025-06-10 23:23:27,924 - __main__ - ERROR - ❌ SUPABASE_URL: Missing
+2025-06-10 23:23:27,924 - __main__ - ERROR - ❌ SUPABASE_SERVICE_ROLE_KEY: Missing
+2025-06-10 23:23:27,924 - __main__ - ERROR - ❌ SPOTIFY_CLIENT_ID: Missing
+2025-06-10 23:23:27,924 - __main__ - ERROR - ❌ SPOTIFY_CLIENT_SECRET: Missing
+2025-06-10 23:23:27,924 - __main__ - ERROR - ❌ DEEPSEEK_API_KEY: Missing
+2025-06-10 23:23:27,924 - __main__ - ERROR - 
+💥 Missing environment variables: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET', 'DEEPSEEK_API_KEY']
+2025-06-10 23:23:27,924 - __main__ - ERROR - ❌ Environment setup failed. Please check your .env file.
+2025-06-10 23:23:46,014 - __main__ - INFO - 🎵 Starting Comprehensive Music Discovery System Tests
+2025-06-10 23:23:46,015 - __main__ - INFO - 
+🔧 Testing Environment Setup
+2025-06-10 23:23:46,015 - __main__ - INFO - ✅ SUPABASE_URL: Present
+2025-06-10 23:23:46,015 - __main__ - INFO - ✅ SUPABASE_SERVICE_ROLE_KEY: Present
+2025-06-10 23:23:46,015 - __main__ - INFO - ✅ SPOTIFY_CLIENT_ID: Present
+2025-06-10 23:23:46,015 - __main__ - INFO - ✅ SPOTIFY_CLIENT_SECRET: Present
+2025-06-10 23:23:46,015 - __main__ - INFO - ✅ DEEPSEEK_API_KEY: Present
+2025-06-10 23:23:46,015 - __main__ - INFO - 
+🎯 All environment variables present!
+2025-06-10 23:23:46,015 - __main__ - INFO - 
+🎤 Testing Artist Name Extraction
+2025-06-10 23:23:46,015 - app.agents.crawl4ai_youtube_agent - INFO - ✅ Enhanced Crawl4AI YouTube Agent initialized with anti-blocking features
+2025-06-10 23:23:46,188 - app.agents.crawl4ai_enrichment_agent - INFO - ✅ Crawl4AI Enrichment Agent initialized
+2025-06-10 23:23:46,244 - __main__ - INFO - ✅ 'Ed Sheeran - Shape of You (Official Video)' → 'Ed Sheeran' (Expected: Ed Sheeran)
+2025-06-10 23:23:46,244 - __main__ - INFO - ✅ 'Billie Eilish - bad guy' → 'Billie Eilish' (Expected: Billie Eilish)
+2025-06-10 23:23:46,244 - __main__ - INFO - ✅ 'The Weeknd | Blinding Lights (Official Music Video)' → 'The Weeknd' (Expected: The Weeknd)
+2025-06-10 23:23:46,245 - __main__ - INFO - ✅ 'Drake: God's Plan' → 'Drake' (Expected: Drake)
+2025-06-10 23:23:46,245 - __main__ - ERROR - ❌ 'Taylor Swift "Anti-Hero" Official Video' → 'Taylor Swift "Anti' (Expected: Taylor Swift)
+2025-06-10 23:23:46,245 - __main__ - INFO - ✅ 'Post Malone - Circles (Official Video)' → 'Post Malone' (Expected: Post Malone)
+2025-06-10 23:23:46,245 - __main__ - INFO - ✅ 'Ariana Grande - positions (official video)' → 'Ariana Grande' (Expected: Ariana Grande)
+2025-06-10 23:23:46,245 - __main__ - INFO - ✅ 'BTS - Dynamite (Official MV)' → 'BTS' (Expected: BTS)
+2025-06-10 23:23:46,245 - __main__ - INFO - 
+🎯 Artist Name Extraction Results:
+2025-06-10 23:23:46,245 - __main__ - INFO -    Passed: 7/8
+2025-06-10 23:23:46,245 - __main__ - INFO -    Failed: 1/8
+2025-06-10 23:23:46,246 - __main__ - INFO -    Success Rate: 87.5%
+2025-06-10 23:23:46,246 - __main__ - INFO - 🎵 Starting Comprehensive Music Discovery Test
+2025-06-10 23:23:46,246 - __main__ - INFO - 
+============================================================
+2025-06-10 23:23:46,246 - __main__ - INFO - 🧪 Running: Basic Discovery Test
+2025-06-10 23:23:46,246 - __main__ - INFO - 📝 Description: Test basic discovery workflow with 5 artists
+2025-06-10 23:23:46,246 - __main__ - INFO - ============================================================
+2025-06-10 23:23:46,246 - app.agents.crawl4ai_youtube_agent - INFO - ✅ Enhanced Crawl4AI YouTube Agent initialized with anti-blocking features
+2025-06-10 23:23:46,276 - app.agents.crawl4ai_enrichment_agent - INFO - ✅ Crawl4AI Enrichment Agent initialized
+2025-06-10 23:23:46,309 - app.agents.comprehensive_music_discovery_agent - INFO - 🎵 Starting comprehensive music discovery for up to 5 artists
+2025-06-10 23:23:46,309 - app.agents.comprehensive_music_discovery_agent - INFO - Searching YouTube for 'official music video' with today's uploads, under 4 min, 4K quality
+2025-06-10 23:23:46,309 - app.agents.crawl4ai_youtube_agent - INFO - Attempting YouTube search with strategy 1: _search_with_basic_config
+2025-06-10 23:23:56,114 - app.agents.crawl4ai_youtube_agent - INFO - Found 20 containers with selector: ytd-video-renderer
+2025-06-10 23:23:56,193 - app.agents.crawl4ai_youtube_agent - INFO - Found 620 containers with selector: .ytd-video-renderer
+2025-06-10 23:23:56,211 - app.agents.crawl4ai_youtube_agent - INFO - Found 220 containers with selector: div[class*="video-renderer"]
+2025-06-10 23:23:56,474 - app.agents.crawl4ai_youtube_agent - INFO - Found 104 video containers
+2025-06-10 23:23:56,516 - app.agents.crawl4ai_youtube_agent - INFO - Successfully extracted 6 videos
+2025-06-10 23:23:56,702 - app.agents.comprehensive_music_discovery_agent - INFO - Found 6 YouTube videos to process
+2025-06-10 23:23:56,702 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Mimi Webb
+2025-06-10 23:23:58,158 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Mimi+Webb%25 "HTTP/2 404 Not Found"
+2025-06-10 23:23:58,164 - app.agents.comprehensive_music_discovery_agent - ERROR - Error checking artist existence: {'message': 'relation "public.artist" does not exist', 'code': '42P01', 'hint': None, 'details': None}
+2025-06-10 23:23:58,165 - app.agents.comprehensive_music_discovery_agent - ERROR - Error processing video Mimi Webb - Love Language (Official Music Video): expected string or bytes-like object, got 'NoneType'
+2025-06-10 23:23:58,165 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Mimi Webb
+2025-06-10 23:23:58,277 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Mimi+Webb%25 "HTTP/2 404 Not Found"
+2025-06-10 23:23:58,277 - app.agents.comprehensive_music_discovery_agent - ERROR - Error checking artist existence: {'message': 'relation "public.artist" does not exist', 'code': '42P01', 'hint': None, 'details': None}
+2025-06-10 23:23:58,277 - app.agents.comprehensive_music_discovery_agent - ERROR - Error processing video Mimi Webb - Love Language (Official Music Video): expected string or bytes-like object, got 'NoneType'
+2025-06-10 23:23:58,277 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Mimi Webb
+2025-06-10 23:23:58,323 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Mimi+Webb%25 "HTTP/2 404 Not Found"
+2025-06-10 23:23:58,324 - app.agents.comprehensive_music_discovery_agent - ERROR - Error checking artist existence: {'message': 'relation "public.artist" does not exist', 'code': '42P01', 'hint': None, 'details': None}
+2025-06-10 23:23:58,324 - app.agents.comprehensive_music_discovery_agent - ERROR - Error processing video Mimi Webb - Love Language (Official Music Video): expected string or bytes-like object, got 'NoneType'
+2025-06-10 23:23:58,324 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Mimi Webb
+2025-06-10 23:23:58,381 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Mimi+Webb%25 "HTTP/2 404 Not Found"
+2025-06-10 23:23:58,382 - app.agents.comprehensive_music_discovery_agent - ERROR - Error checking artist existence: {'message': 'relation "public.artist" does not exist', 'code': '42P01', 'hint': None, 'details': None}
+2025-06-10 23:23:58,382 - app.agents.comprehensive_music_discovery_agent - ERROR - Error processing video Mimi Webb - Love Language (Official Music Video): expected string or bytes-like object, got 'NoneType'
+2025-06-10 23:23:58,382 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Mimi Webb
+2025-06-10 23:23:58,490 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Mimi+Webb%25 "HTTP/2 404 Not Found"
+2025-06-10 23:23:58,492 - app.agents.comprehensive_music_discovery_agent - ERROR - Error checking artist existence: {'message': 'relation "public.artist" does not exist', 'code': '42P01', 'hint': None, 'details': None}
+2025-06-10 23:23:58,492 - app.agents.comprehensive_music_discovery_agent - ERROR - Error processing video Mimi Webb - Love Language (Official Music Video): expected string or bytes-like object, got 'NoneType'
+2025-06-10 23:23:58,492 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Mimi Webb
+2025-06-10 23:23:58,549 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Mimi+Webb%25 "HTTP/2 404 Not Found"
+2025-06-10 23:23:58,550 - app.agents.comprehensive_music_discovery_agent - ERROR - Error checking artist existence: {'message': 'relation "public.artist" does not exist', 'code': '42P01', 'hint': None, 'details': None}
+2025-06-10 23:23:58,550 - app.agents.comprehensive_music_discovery_agent - ERROR - Error processing video Mimi Webb - Love Language (Official Music Video): expected string or bytes-like object, got 'NoneType'
+2025-06-10 23:23:58,550 - app.agents.comprehensive_music_discovery_agent - INFO - Processed 6/5 videos
+2025-06-10 23:24:00,552 - app.agents.comprehensive_music_discovery_agent - INFO - 🎯 Discovery complete! Found 0 new artists
+2025-06-10 23:24:00,552 - __main__ - INFO - ✅ Basic Discovery Test: PASSED
+2025-06-10 23:24:00,552 - __main__ - INFO -    Artists Found: 0
+2025-06-10 23:24:00,552 - __main__ - INFO -    Successful Discoveries: 0
+2025-06-10 23:24:00,552 - __main__ - INFO - 
+============================================================
+2025-06-10 23:24:00,552 - __main__ - INFO - 🧪 Running: Artist Name Extraction Test
+2025-06-10 23:24:00,552 - __main__ - INFO - 📝 Description: Test artist name extraction from video titles
+2025-06-10 23:24:00,552 - __main__ - INFO - ============================================================
+2025-06-10 23:24:00,552 - app.agents.crawl4ai_youtube_agent - INFO - ✅ Enhanced Crawl4AI YouTube Agent initialized with anti-blocking features
+2025-06-10 23:24:00,582 - app.agents.crawl4ai_enrichment_agent - INFO - ✅ Crawl4AI Enrichment Agent initialized
+2025-06-10 23:24:00,617 - app.agents.comprehensive_music_discovery_agent - INFO - 🎵 Starting comprehensive music discovery for up to 1 artists
+2025-06-10 23:24:00,617 - app.agents.comprehensive_music_discovery_agent - INFO - Searching YouTube for 'official music video' with today's uploads, under 4 min, 4K quality
+2025-06-10 23:24:00,617 - app.agents.crawl4ai_youtube_agent - INFO - Attempting YouTube search with strategy 1: _search_with_basic_config
+2025-06-10 23:24:08,576 - app.agents.crawl4ai_youtube_agent - INFO - Found 20 containers with selector: ytd-video-renderer
+2025-06-10 23:24:08,660 - app.agents.crawl4ai_youtube_agent - INFO - Found 620 containers with selector: .ytd-video-renderer
+2025-06-10 23:24:08,680 - app.agents.crawl4ai_youtube_agent - INFO - Found 220 containers with selector: div[class*="video-renderer"]
+2025-06-10 23:24:08,949 - app.agents.crawl4ai_youtube_agent - INFO - Found 103 video containers
+2025-06-10 23:24:08,983 - app.agents.crawl4ai_youtube_agent - INFO - Successfully extracted 6 videos
+2025-06-10 23:24:09,093 - app.agents.comprehensive_music_discovery_agent - INFO - Found 6 YouTube videos to process
+2025-06-10 23:24:09,093 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Castle Rat
+2025-06-10 23:24:09,228 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Castle+Rat%25 "HTTP/2 404 Not Found"
+2025-06-10 23:24:09,228 - app.agents.comprehensive_music_discovery_agent - ERROR - Error checking artist existence: {'message': 'relation "public.artist" does not exist', 'code': '42P01', 'hint': None, 'details': None}
+2025-06-10 23:24:09,229 - app.agents.comprehensive_music_discovery_agent - ERROR - Error processing video Castle Rat - “WIZARD” (Official Music Video): expected string or bytes-like object, got 'NoneType'
+2025-06-10 23:24:09,229 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Castle Rat
+2025-06-10 23:24:09,265 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Castle+Rat%25 "HTTP/2 404 Not Found"
+2025-06-10 23:24:09,266 - app.agents.comprehensive_music_discovery_agent - ERROR - Error checking artist existence: {'message': 'relation "public.artist" does not exist', 'code': '42P01', 'hint': None, 'details': None}
+2025-06-10 23:24:09,266 - app.agents.comprehensive_music_discovery_agent - ERROR - Error processing video Castle Rat - “WIZARD” (Official Music Video): expected string or bytes-like object, got 'NoneType'
+2025-06-10 23:24:09,266 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Castle Rat
+2025-06-10 23:24:09,307 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Castle+Rat%25 "HTTP/2 404 Not Found"
+2025-06-10 23:24:09,308 - app.agents.comprehensive_music_discovery_agent - ERROR - Error checking artist existence: {'message': 'relation "public.artist" does not exist', 'code': '42P01', 'hint': None, 'details': None}
+2025-06-10 23:24:09,308 - app.agents.comprehensive_music_discovery_agent - ERROR - Error processing video Castle Rat - “WIZARD” (Official Music Video): expected string or bytes-like object, got 'NoneType'
+2025-06-10 23:24:09,308 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Castle Rat
+2025-06-10 23:24:09,358 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Castle+Rat%25 "HTTP/2 404 Not Found"
+2025-06-10 23:24:09,359 - app.agents.comprehensive_music_discovery_agent - ERROR - Error checking artist existence: {'message': 'relation "public.artist" does not exist', 'code': '42P01', 'hint': None, 'details': None}
+2025-06-10 23:24:09,359 - app.agents.comprehensive_music_discovery_agent - ERROR - Error processing video Castle Rat - “WIZARD” (Official Music Video): expected string or bytes-like object, got 'NoneType'
+2025-06-10 23:24:09,359 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Castle Rat
+2025-06-10 23:24:09,407 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Castle+Rat%25 "HTTP/2 404 Not Found"
+2025-06-10 23:24:09,407 - app.agents.comprehensive_music_discovery_agent - ERROR - Error checking artist existence: {'message': 'relation "public.artist" does not exist', 'code': '42P01', 'hint': None, 'details': None}
+2025-06-10 23:24:09,408 - app.agents.comprehensive_music_discovery_agent - ERROR - Error processing video Castle Rat - “WIZARD” (Official Music Video): expected string or bytes-like object, got 'NoneType'
+2025-06-10 23:24:09,408 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Castle Rat
+2025-06-10 23:24:09,450 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Castle+Rat%25 "HTTP/2 404 Not Found"
+2025-06-10 23:24:09,450 - app.agents.comprehensive_music_discovery_agent - ERROR - Error checking artist existence: {'message': 'relation "public.artist" does not exist', 'code': '42P01', 'hint': None, 'details': None}
+2025-06-10 23:24:09,450 - app.agents.comprehensive_music_discovery_agent - ERROR - Error processing video Castle Rat - “WIZARD” (Official Music Video): expected string or bytes-like object, got 'NoneType'
+2025-06-10 23:24:09,450 - app.agents.comprehensive_music_discovery_agent - INFO - Processed 6/1 videos
+2025-06-10 23:24:11,452 - app.agents.comprehensive_music_discovery_agent - INFO - 🎯 Discovery complete! Found 0 new artists
+2025-06-10 23:24:11,452 - __main__ - INFO - ✅ Artist Name Extraction Test: PASSED
+2025-06-10 23:24:11,452 - __main__ - INFO -    Artists Found: 0
+2025-06-10 23:24:11,452 - __main__ - INFO -    Successful Discoveries: 0
+2025-06-10 23:24:11,452 - __main__ - INFO - 
+================================================================================
+2025-06-10 23:24:11,452 - __main__ - INFO - 🎵 COMPREHENSIVE MUSIC DISCOVERY TEST REPORT
+2025-06-10 23:24:11,452 - __main__ - INFO - ================================================================================
+2025-06-10 23:24:11,452 - __main__ - INFO - 📊 Overall Results:
+2025-06-10 23:24:11,453 - __main__ - INFO -    Total Tests: 2
+2025-06-10 23:24:11,453 - __main__ - INFO -    Passed: 0
+2025-06-10 23:24:11,453 - __main__ - INFO -    Failed: 2
+2025-06-10 23:24:11,453 - __main__ - INFO -    Success Rate: 0.0%
+2025-06-10 23:24:11,453 - __main__ - INFO - 
+📋 Detailed Results:
+2025-06-10 23:24:11,453 - __main__ - INFO -    ❌ Basic Discovery Test: FAILED
+2025-06-10 23:24:11,453 - __main__ - INFO -       Error: Unknown error
+2025-06-10 23:24:11,453 - __main__ - INFO -    ❌ Artist Name Extraction Test: FAILED
+2025-06-10 23:24:11,454 - __main__ - INFO -       Error: Unknown error
+2025-06-10 23:24:11,454 - __main__ - INFO - ================================================================================
+2025-06-10 23:24:11,454 - __main__ - INFO - 
+🏁 Test Suite Complete!
+2025-06-10 23:24:11,454 - __main__ - INFO - Environment Setup: ✅
+2025-06-10 23:24:11,454 - __main__ - INFO - Artist Name Extraction: 7/8 passed
+2025-06-10 23:24:11,454 - __main__ - INFO - Discovery Tests: 0/2 passed
+2025-06-10 23:24:11,454 - __main__ - INFO - ⚠️  Some tests failed. Please review the issues above.
+2025-06-10 23:25:39,826 - __main__ - INFO - 🎵 Starting Comprehensive Music Discovery System Tests
+2025-06-10 23:25:39,827 - __main__ - INFO - 
+🔧 Testing Environment Setup
+2025-06-10 23:25:39,827 - __main__ - INFO - ✅ SUPABASE_URL: Present
+2025-06-10 23:25:39,827 - __main__ - INFO - ✅ SUPABASE_SERVICE_ROLE_KEY: Present
+2025-06-10 23:25:39,827 - __main__ - INFO - ✅ SPOTIFY_CLIENT_ID: Present
+2025-06-10 23:25:39,827 - __main__ - INFO - ✅ SPOTIFY_CLIENT_SECRET: Present
+2025-06-10 23:25:39,827 - __main__ - INFO - ✅ DEEPSEEK_API_KEY: Present
+2025-06-10 23:25:39,827 - __main__ - INFO - 
+🎯 All environment variables present!
+2025-06-10 23:25:39,827 - __main__ - INFO - 
+🎤 Testing Artist Name Extraction
+2025-06-10 23:25:39,827 - app.agents.crawl4ai_youtube_agent - INFO - ✅ Enhanced Crawl4AI YouTube Agent initialized with anti-blocking features
+2025-06-10 23:25:40,020 - app.agents.crawl4ai_enrichment_agent - INFO - ✅ Crawl4AI Enrichment Agent initialized
+2025-06-10 23:25:40,062 - __main__ - INFO - ✅ 'Ed Sheeran - Shape of You (Official Video)' → 'Ed Sheeran' (Expected: Ed Sheeran)
+2025-06-10 23:25:40,062 - __main__ - INFO - ✅ 'Billie Eilish - bad guy' → 'Billie Eilish' (Expected: Billie Eilish)
+2025-06-10 23:25:40,062 - __main__ - INFO - ✅ 'The Weeknd | Blinding Lights (Official Music Video)' → 'The Weeknd' (Expected: The Weeknd)
+2025-06-10 23:25:40,062 - __main__ - INFO - ✅ 'Drake: God's Plan' → 'Drake' (Expected: Drake)
+2025-06-10 23:25:40,062 - __main__ - ERROR - ❌ 'Taylor Swift "Anti-Hero" Official Video' → 'Taylor Swift "Anti' (Expected: Taylor Swift)
+2025-06-10 23:25:40,062 - __main__ - INFO - ✅ 'Post Malone - Circles (Official Video)' → 'Post Malone' (Expected: Post Malone)
+2025-06-10 23:25:40,062 - __main__ - INFO - ✅ 'Ariana Grande - positions (official video)' → 'Ariana Grande' (Expected: Ariana Grande)
+2025-06-10 23:25:40,062 - __main__ - INFO - ✅ 'BTS - Dynamite (Official MV)' → 'BTS' (Expected: BTS)
+2025-06-10 23:25:40,062 - __main__ - INFO - 
+🎯 Artist Name Extraction Results:
+2025-06-10 23:25:40,062 - __main__ - INFO -    Passed: 7/8
+2025-06-10 23:25:40,062 - __main__ - INFO -    Failed: 1/8
+2025-06-10 23:25:40,064 - __main__ - INFO -    Success Rate: 87.5%
+2025-06-10 23:25:40,064 - __main__ - INFO - 🎵 Starting Comprehensive Music Discovery Test
+2025-06-10 23:25:40,064 - __main__ - INFO - 
+============================================================
+2025-06-10 23:25:40,064 - __main__ - INFO - 🧪 Running: Basic Discovery Test
+2025-06-10 23:25:40,064 - __main__ - INFO - 📝 Description: Test basic discovery workflow with 5 artists
+2025-06-10 23:25:40,064 - __main__ - INFO - ============================================================
+2025-06-10 23:25:40,064 - app.agents.crawl4ai_youtube_agent - INFO - ✅ Enhanced Crawl4AI YouTube Agent initialized with anti-blocking features
+2025-06-10 23:25:40,097 - app.agents.crawl4ai_enrichment_agent - INFO - ✅ Crawl4AI Enrichment Agent initialized
+2025-06-10 23:25:40,133 - app.agents.comprehensive_music_discovery_agent - INFO - 🎵 Starting comprehensive music discovery for up to 5 artists
+2025-06-10 23:25:40,133 - app.agents.comprehensive_music_discovery_agent - INFO - Searching YouTube for 'official music video' with today's uploads, under 4 min, 4K quality
+2025-06-10 23:25:40,133 - app.agents.crawl4ai_youtube_agent - INFO - Attempting YouTube search with strategy 1: _search_with_basic_config
+2025-06-10 23:25:50,532 - app.agents.crawl4ai_youtube_agent - INFO - Found 20 containers with selector: ytd-video-renderer
+2025-06-10 23:25:50,616 - app.agents.crawl4ai_youtube_agent - INFO - Found 620 containers with selector: .ytd-video-renderer
+2025-06-10 23:25:50,636 - app.agents.crawl4ai_youtube_agent - INFO - Found 220 containers with selector: div[class*="video-renderer"]
+2025-06-10 23:25:50,917 - app.agents.crawl4ai_youtube_agent - INFO - Found 105 video containers
+2025-06-10 23:25:50,960 - app.agents.crawl4ai_youtube_agent - INFO - Successfully extracted 6 videos
+2025-06-10 23:25:51,076 - app.agents.comprehensive_music_discovery_agent - INFO - Found 6 YouTube videos to process
+2025-06-10 23:25:51,076 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Mimi Webb
+2025-06-10 23:25:51,411 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Mimi+Webb%25 "HTTP/2 200 OK"
+2025-06-10 23:25:51,476 - httpx - INFO - HTTP Request: POST https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist "HTTP/2 201 Created"
+2025-06-10 23:25:51,477 - app.agents.comprehensive_music_discovery_agent - INFO - Created artist record for Mimi Webb with ID 2
+2025-06-10 23:25:51,527 - httpx - INFO - HTTP Request: PATCH https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?id=eq.2 "HTTP/2 200 OK"
+2025-06-10 23:25:52,530 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Mimi Webb
+2025-06-10 23:25:52,737 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Mimi+Webb%25 "HTTP/2 200 OK"
+2025-06-10 23:25:53,739 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Mimi Webb
+2025-06-10 23:25:53,787 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Mimi+Webb%25 "HTTP/2 200 OK"
+2025-06-10 23:25:54,789 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Mimi Webb
+2025-06-10 23:25:54,832 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Mimi+Webb%25 "HTTP/2 200 OK"
+2025-06-10 23:25:55,833 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Mimi Webb
+2025-06-10 23:25:55,927 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Mimi+Webb%25 "HTTP/2 200 OK"
+2025-06-10 23:25:56,929 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Mimi Webb
+2025-06-10 23:25:56,994 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Mimi+Webb%25 "HTTP/2 200 OK"
+2025-06-10 23:25:57,997 - app.agents.comprehensive_music_discovery_agent - INFO - Processed 6/5 videos
+2025-06-10 23:25:59,997 - app.agents.comprehensive_music_discovery_agent - INFO - 🎯 Discovery complete! Found 1 new artists
+2025-06-10 23:25:59,998 - __main__ - INFO - ✅ Basic Discovery Test: PASSED
+2025-06-10 23:25:59,998 - __main__ - INFO -    Artists Found: 1
+2025-06-10 23:25:59,998 - __main__ - INFO -    Successful Discoveries: 1
+2025-06-10 23:25:59,998 - __main__ - INFO -    1. Mimi Webb (Score: 0)
+2025-06-10 23:25:59,998 - __main__ - INFO - 
+============================================================
+2025-06-10 23:25:59,998 - __main__ - INFO - 🧪 Running: Artist Name Extraction Test
+2025-06-10 23:25:59,998 - __main__ - INFO - 📝 Description: Test artist name extraction from video titles
+2025-06-10 23:25:59,998 - __main__ - INFO - ============================================================
+2025-06-10 23:25:59,998 - app.agents.crawl4ai_youtube_agent - INFO - ✅ Enhanced Crawl4AI YouTube Agent initialized with anti-blocking features
+2025-06-10 23:26:00,044 - app.agents.crawl4ai_enrichment_agent - INFO - ✅ Crawl4AI Enrichment Agent initialized
+2025-06-10 23:26:00,080 - app.agents.comprehensive_music_discovery_agent - INFO - 🎵 Starting comprehensive music discovery for up to 1 artists
+2025-06-10 23:26:00,081 - app.agents.comprehensive_music_discovery_agent - INFO - Searching YouTube for 'official music video' with today's uploads, under 4 min, 4K quality
+2025-06-10 23:26:00,081 - app.agents.crawl4ai_youtube_agent - INFO - Attempting YouTube search with strategy 1: _search_with_basic_config
+2025-06-10 23:26:07,617 - app.agents.crawl4ai_youtube_agent - INFO - Found 20 containers with selector: ytd-video-renderer
+2025-06-10 23:26:07,698 - app.agents.crawl4ai_youtube_agent - INFO - Found 620 containers with selector: .ytd-video-renderer
+2025-06-10 23:26:07,718 - app.agents.crawl4ai_youtube_agent - INFO - Found 220 containers with selector: div[class*="video-renderer"]
+2025-06-10 23:26:07,984 - app.agents.crawl4ai_youtube_agent - INFO - Found 104 video containers
+2025-06-10 23:26:08,030 - app.agents.crawl4ai_youtube_agent - INFO - Successfully extracted 6 videos
+2025-06-10 23:26:08,134 - app.agents.comprehensive_music_discovery_agent - INFO - Found 6 YouTube videos to process
+2025-06-10 23:26:08,134 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Mimi Webb
+2025-06-10 23:26:08,257 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Mimi+Webb%25 "HTTP/2 200 OK"
+2025-06-10 23:26:09,261 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Mimi Webb
+2025-06-10 23:26:09,357 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Mimi+Webb%25 "HTTP/2 200 OK"
+2025-06-10 23:26:10,359 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Mimi Webb
+2025-06-10 23:26:10,405 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Mimi+Webb%25 "HTTP/2 200 OK"
+2025-06-10 23:26:11,407 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Mimi Webb
+2025-06-10 23:26:11,454 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Mimi+Webb%25 "HTTP/2 200 OK"
+2025-06-10 23:26:12,456 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Mimi Webb
+2025-06-10 23:26:12,501 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Mimi+Webb%25 "HTTP/2 200 OK"
+2025-06-10 23:26:13,503 - app.agents.comprehensive_music_discovery_agent - INFO - 🎤 Processing artist: Mimi Webb
+2025-06-10 23:26:13,547 - httpx - INFO - HTTP Request: GET https://aflxjobceqjpjftxwewp.supabase.co/rest/v1/artist?select=id&name=ilike.%25Mimi+Webb%25 "HTTP/2 200 OK"
+2025-06-10 23:26:14,548 - app.agents.comprehensive_music_discovery_agent - INFO - Processed 6/1 videos
+2025-06-10 23:26:16,550 - app.agents.comprehensive_music_discovery_agent - INFO - 🎯 Discovery complete! Found 0 new artists
+2025-06-10 23:26:16,550 - __main__ - INFO - ✅ Artist Name Extraction Test: PASSED
+2025-06-10 23:26:16,550 - __main__ - INFO -    Artists Found: 0
+2025-06-10 23:26:16,550 - __main__ - INFO -    Successful Discoveries: 0
+2025-06-10 23:26:16,551 - __main__ - INFO - 
+================================================================================
+2025-06-10 23:26:16,551 - __main__ - INFO - 🎵 COMPREHENSIVE MUSIC DISCOVERY TEST REPORT
+2025-06-10 23:26:16,551 - __main__ - INFO - ================================================================================
+2025-06-10 23:26:16,551 - __main__ - INFO - 📊 Overall Results:
+2025-06-10 23:26:16,551 - __main__ - INFO -    Total Tests: 2
+2025-06-10 23:26:16,551 - __main__ - INFO -    Passed: 1
+2025-06-10 23:26:16,551 - __main__ - INFO -    Failed: 1
+2025-06-10 23:26:16,551 - __main__ - INFO -    Success Rate: 50.0%
+2025-06-10 23:26:16,551 - __main__ - INFO - 
+📋 Detailed Results:
+2025-06-10 23:26:16,551 - __main__ - INFO -    ✅ Basic Discovery Test: PASSED
+2025-06-10 23:26:16,551 - __main__ - INFO -       Artists Found: 1
+2025-06-10 23:26:16,551 - __main__ - INFO -       Successful Discoveries: 1
+2025-06-10 23:26:16,551 - __main__ - INFO -       Sample Artists:
+2025-06-10 23:26:16,551 - __main__ - INFO -         - Mimi Webb (Score: 0)
+2025-06-10 23:26:16,551 - __main__ - INFO -    ❌ Artist Name Extraction Test: FAILED
+2025-06-10 23:26:16,552 - __main__ - INFO -       Error: Unknown error
+2025-06-10 23:26:16,552 - __main__ - INFO - ================================================================================
+2025-06-10 23:26:16,552 - __main__ - INFO - 
+🏁 Test Suite Complete!
+2025-06-10 23:26:16,552 - __main__ - INFO - Environment Setup: ✅
+2025-06-10 23:26:16,552 - __main__ - INFO - Artist Name Extraction: 7/8 passed
+2025-06-10 23:26:16,552 - __main__ - INFO - Discovery Tests: 1/2 passed
+2025-06-10 23:26:16,552 - __main__ - INFO - 🎉 Music Discovery System is working! Ready for production testing.

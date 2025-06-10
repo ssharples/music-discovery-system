@@ -33,12 +33,6 @@ class QuotaManager:
         'album_tracks': 1
     }
     
-    FIRECRAWL_COSTS = {
-        'scrape': 1,
-        'search': 1,
-        'extract': 2,
-        'map': 1
-    }
     
     def __init__(self):
         self._usage_cache = defaultdict(int)

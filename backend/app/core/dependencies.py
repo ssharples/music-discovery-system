@@ -85,12 +85,17 @@ async def get_pipeline_deps() -> PipelineDependencies:
         supabase=get_supabase(),
         redis_client=await get_redis(),
         http_client=get_http_client(),
-        youtube_api_key=settings.YOUTUBE_API_KEY,
-        spotify_client_id=settings.SPOTIFY_CLIENT_ID,
-        spotify_client_secret=settings.SPOTIFY_CLIENT_SECRET,
-        deepseek_api_key=settings.DEEPSEEK_API_KEY,
-        firecrawl_api_key=settings.FIRECRAWL_API_KEY
+        youtube_api_key=getattr(settings, 'YOUTUBE_API_KEY', ''),
+        spotify_client_id=getattr(settings, 'SPOTIFY_CLIENT_ID', ''),
+        spotify_client_secret=getattr(settings, 'SPOTIFY_CLIENT_SECRET', ''),
+        deepseek_api_key=getattr(settings, 'DEEPSEEK_API_KEY', ''),
+        firecrawl_api_key=getattr(settings, 'FIRECRAWL_API_KEY', '')
     )
+
+# Alias for FastAPI dependency injection
+async def get_pipeline_dependencies() -> PipelineDependencies:
+    """Get pipeline dependencies - alias for FastAPI dependency injection"""
+    return await get_pipeline_deps()
 
 async def cleanup_dependencies():
     """Cleanup global dependencies on shutdown"""

@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     SPOTIFY_CLIENT_ID: str = Field("", env="SPOTIFY_CLIENT_ID")
     SPOTIFY_CLIENT_SECRET: str = Field("", env="SPOTIFY_CLIENT_SECRET")
     DEEPSEEK_API_KEY: str = Field("", env="DEEPSEEK_API_KEY")
+    FIRECRAWL_API_KEY: str = Field("", env="FIRECRAWL_API_KEY")  # Added for Firecrawl integration
     
     # Enhanced AI Provider Keys
     OPENAI_API_KEY: str = Field("", env="OPENAI_API_KEY")
@@ -77,9 +78,38 @@ class Settings(BaseSettings):
             return v + "0" * (32 - len(v))
         return v
     
+    # Additional fields for music discovery system
+    SUPABASE_ANON_KEY: str = Field("", env="SUPABASE_ANON_KEY")
+    LOG_LEVEL: str = Field("INFO", env="LOG_LEVEL")
+    CRAWL4AI_CACHE_DIR: str = Field("./cache", env="CRAWL4AI_CACHE_DIR")
+    USER_AGENT_MODE: str = Field("random", env="USER_AGENT_MODE")
+    MAX_CONCURRENT_CRAWLS: int = Field(5, env="MAX_CONCURRENT_CRAWLS")
+    
+    # Rate limiting for different platforms
+    YOUTUBE_DELAY_MIN: float = Field(1.0, env="YOUTUBE_DELAY_MIN")
+    YOUTUBE_DELAY_MAX: float = Field(3.0, env="YOUTUBE_DELAY_MAX")
+    SPOTIFY_DELAY_MIN: float = Field(0.5, env="SPOTIFY_DELAY_MIN")
+    SPOTIFY_DELAY_MAX: float = Field(1.5, env="SPOTIFY_DELAY_MAX")
+    INSTAGRAM_DELAY_MIN: float = Field(2.0, env="INSTAGRAM_DELAY_MIN")
+    INSTAGRAM_DELAY_MAX: float = Field(4.0, env="INSTAGRAM_DELAY_MAX")
+    TIKTOK_DELAY_MIN: float = Field(2.0, env="TIKTOK_DELAY_MIN")
+    TIKTOK_DELAY_MAX: float = Field(4.0, env="TIKTOK_DELAY_MAX")
+    
+    # Discovery configuration
+    MAX_VIDEOS_PER_SEARCH: int = Field(1000, env="MAX_VIDEOS_PER_SEARCH")
+    DISCOVERY_SCORE_THRESHOLD: int = Field(30, env="DISCOVERY_SCORE_THRESHOLD")
+    BATCH_SIZE: int = Field(50, env="BATCH_SIZE")
+    ENABLE_PARALLEL_PROCESSING: bool = Field(True, env="ENABLE_PARALLEL_PROCESSING")
+    
+    # Content filtering
+    EXCLUDE_AI_KEYWORDS: str = Field('["ai", "suno", "generated", "udio", "cover", "remix", "artificial intelligence", "ai-generated"]', env="EXCLUDE_AI_KEYWORDS")
+    MIN_SUBSCRIBER_COUNT: int = Field(1000, env="MIN_SUBSCRIBER_COUNT")
+    MIN_SPOTIFY_MONTHLY_LISTENERS: int = Field(10000, env="MIN_SPOTIFY_MONTHLY_LISTENERS")
+    
     model_config = {
         "env_file": ".env",
-        "case_sensitive": True
+        "case_sensitive": True,
+        "extra": "allow"  # Allow extra fields from environment
     }
     
     def is_supabase_configured(self) -> bool:

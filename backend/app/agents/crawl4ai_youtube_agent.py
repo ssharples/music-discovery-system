@@ -1,519 +1,646 @@
 """
-Crawl4AI YouTube Agent - Replaces Apify YouTube scraping
+Crawl4AI YouTube Agent - Enhanced with Anti-Blocking Strategies
 Uses Crawl4AI's browser automation to scrape YouTube search results
 """
 import asyncio
-import json
 import logging
-import re
+import random
 from typing import List, Dict, Any, Optional
-from datetime import datetime
-import urllib.parse
+from urllib.parse import quote_plus
 
-from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
-from crawl4ai.extraction_strategy import JsonCssExtractionStrategy
+from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode, GeolocationConfig
+from crawl4ai.models import CrawlResult
+
+from ..models.youtube_models import YouTubeVideo, YouTubeSearchResult
 
 logger = logging.getLogger(__name__)
 
-
 class Crawl4AIYouTubeAgent:
-    """YouTube scraping agent using Crawl4AI instead of Apify"""
+    """Enhanced YouTube agent with comprehensive anti-blocking strategies."""
     
     def __init__(self):
-        """Initialize the Crawl4AI YouTube agent"""
-        self.browser_config = BrowserConfig(
+        """Initialize the Crawl4AI YouTube agent with anti-blocking features."""
+        # Anti-bot user agents rotation
+        self.user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:121.0) Gecko/20100101 Firefox/121.0"
+        ]
+        
+        # Geolocation rotation for different regions
+        self.geolocations = [
+            GeolocationConfig(latitude=40.7128, longitude=-74.0060, accuracy=100),  # New York
+            GeolocationConfig(latitude=34.0522, longitude=-118.2437, accuracy=100),  # Los Angeles
+            GeolocationConfig(latitude=51.5074, longitude=-0.1278, accuracy=100),  # London
+            GeolocationConfig(latitude=48.8566, longitude=2.3522, accuracy=100),  # Paris
+            GeolocationConfig(latitude=35.6762, longitude=139.6503, accuracy=100),  # Tokyo
+        ]
+        
+        # Language/locale rotation
+        self.locales = [
+            {"locale": "en-US", "timezone": "America/New_York"},
+            {"locale": "en-GB", "timezone": "Europe/London"},
+            {"locale": "fr-FR", "timezone": "Europe/Paris"},
+            {"locale": "de-DE", "timezone": "Europe/Berlin"},
+            {"locale": "ja-JP", "timezone": "Asia/Tokyo"}
+        ]
+        
+        # Enhanced selectors with multiple fallbacks
+        self.selectors = {
+            'videos': [
+                'ytd-video-renderer',
+                'ytd-grid-video-renderer', 
+                'ytd-compact-video-renderer',
+                '[data-testid="video-renderer"]',
+                '.ytd-video-renderer',
+                'div[class*="video-renderer"]'
+            ],
+            'title': [
+                '#video-title',
+                'h3 a[href*="/watch"]',
+                'a[aria-label*="by"]',
+                '[data-testid="video-title"]',
+                '.ytd-video-meta-block h3',
+                'yt-formatted-string[aria-label]'
+            ],
+            'channel': [
+                '#channel-name a',
+                '.ytd-channel-name a',
+                'a[href*="/channel/"]',
+                'a[href*="/@"]',
+                '[data-testid="channel-name"]',
+                'yt-formatted-string.ytd-channel-name'
+            ],
+            'views': [
+                '#metadata-line span:first-child',
+                '.inline-metadata-item:first-child',
+                '[data-testid="view-count"]',
+                'span[aria-label*="views"]',
+                '.ytd-video-meta-block span'
+            ],
+            'duration': [
+                '.ytd-thumbnail-overlay-time-status-renderer span',
+                '.badge-shape-wiz__text',
+                '[data-testid="duration"]',
+                'span.ytd-thumbnail-overlay-time-status-renderer'
+            ],
+            'upload_date': [
+                '#metadata-line span:nth-child(2)',
+                '.inline-metadata-item:nth-child(2)',
+                '[data-testid="upload-date"]',
+                'span[aria-label*="ago"]'
+            ]
+        }
+        
+        logger.info("✅ Enhanced Crawl4AI YouTube Agent initialized with anti-blocking features")
+
+    async def get_browser_config(self) -> BrowserConfig:
+        """Create randomized browser configuration with anti-detection features."""
+        user_agent = random.choice(self.user_agents)
+        
+        # Random viewport sizes to mimic different devices
+        viewports = [
+            (1920, 1080), (1366, 768), (1440, 900), (1536, 864), (1280, 720)
+        ]
+        viewport = random.choice(viewports)
+        
+        return BrowserConfig(
+            browser_type="chromium",
             headless=True,
-            viewport_width=1920,
-            viewport_height=1080,
-            extra_headers={
-                "Accept-Language": "en-US,en;q=0.9",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
+            viewport_width=viewport[0],
+            viewport_height=viewport[1],
+            user_agent=user_agent,
+            java_script_enabled=True,
+            ignore_https_errors=True,
+            # Anti-detection flags
+            extra_args=[
+                "--no-sandbox",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-features=VizDisplayCompositor",
+                "--disable-extensions",
+                "--disable-plugins",
+                "--disable-images",  # Faster loading
+                "--disable-javascript-harmony-shipping",
+                "--disable-background-timer-throttling",
+                "--disable-renderer-backgrounding",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-ipc-flooding-protection",
+                "--disable-client-side-phishing-detection",
+                "--disable-default-apps",
+                "--disable-hang-monitor",
+                "--disable-popup-blocking",
+                "--disable-prompt-on-repost",
+                "--disable-sync",
+                "--disable-translate",
+                "--disable-web-security",
+                "--metrics-recording-only",
+                "--no-first-run",
+                "--safebrowsing-disable-auto-update",
+                "--enable-automation",
+                "--password-store=basic",
+                "--use-mock-keychain"
+            ]
         )
-        logger.info("✅ Crawl4AI YouTube Agent initialized")
-    
-    async def search_youtube(
-        self,
-        query: str,
-        max_results: int = 100,
-        upload_date: str = "week",  # today, week, month, year
-        duration: str = "all",  # short (<4min), long (>20min), all
-        sort_by: str = "relevance"  # relevance, date, views, rating
-    ) -> List[Dict[str, Any]]:
+
+    async def get_crawler_config(self) -> CrawlerRunConfig:
+        """Create randomized crawler configuration with stealth features."""
+        # Random locale/timezone
+        locale_config = random.choice(self.locales)
+        
+        # Random geolocation
+        geolocation = random.choice(self.geolocations)
+        
+        return CrawlerRunConfig(
+            # Magic mode for automatic anti-bot handling
+            magic=True,
+            
+            # Identity settings
+            locale=locale_config["locale"],
+            timezone_id=locale_config["timezone"],
+            geolocation=geolocation,
+            
+            # Stealth features
+            simulate_user=True,
+            override_navigator=True,
+            remove_overlay_elements=True,
+            
+            # Timing randomization
+            delay_before_return_html=random.uniform(2.0, 5.0),
+            scroll_delay=random.uniform(0.5, 1.5),
+            
+            # Wait strategies
+            wait_until="domcontentloaded",  # More reliable than networkidle
+            page_timeout=60000,  # Reduced timeout
+            wait_for=None,  # Remove wait_for to avoid timeout issues
+            
+            # Content settings
+            word_count_threshold=10,
+            excluded_tags=["script", "style", "nav", "footer", "aside"],
+            
+            # Performance
+            wait_for_images=False,
+            
+            # Debugging
+            verbose=True,
+            
+            # Cache settings
+            cache_mode=CacheMode.BYPASS
+        )
+
+    async def search_videos(self, query: str, max_results: int = 20, upload_date: str = "all") -> YouTubeSearchResult:
         """
-        Search YouTube and scrape results using Crawl4AI
+        Search YouTube videos with advanced anti-blocking techniques.
         
         Args:
             query: Search query
             max_results: Maximum number of results to return
-            upload_date: Filter by upload date
-            duration: Filter by video duration
-            sort_by: Sort results by
-            
+            upload_date: Filter by upload date ("all", "hour", "today", "week", "month", "year")
+        
         Returns:
-            List of video data dictionaries
+            YouTubeSearchResult with videos found
         """
-        logger.info(f"🔍 Searching YouTube for: {query} (max: {max_results})")
+        videos = []
+        success = False
+        error_message = None
         
-        try:
-            # Build YouTube search URL with filters
-            search_url = self._build_youtube_search_url(query, upload_date, duration, sort_by)
-            
-            # Define extraction schema for YouTube search results
-            schema = {
-                "name": "YouTube Videos",
-                "baseSelector": "ytd-video-renderer",
-                "fields": [
-                    {
-                        "name": "video_id",
-                        "selector": "a#video-title",
-                        "attribute": "href",
-                        "transform": "lambda x: x.split('v=')[1].split('&')[0] if 'v=' in x else ''"
-                    },
-                    {
-                        "name": "title",
-                        "selector": "a#video-title",
-                        "attribute": "title"
-                    },
-                    {
-                        "name": "channel_title",
-                        "selector": "ytd-channel-name a",
-                        "type": "text"
-                    },
-                    {
-                        "name": "channel_url",
-                        "selector": "ytd-channel-name a",
-                        "attribute": "href"
-                    },
-                    {
-                        "name": "views",
-                        "selector": "span.inline-metadata-item:first-child",
-                        "type": "text"
-                    },
-                    {
-                        "name": "published",
-                        "selector": "span.inline-metadata-item:nth-child(2)",
-                        "type": "text"
-                    },
-                    {
-                        "name": "duration",
-                        "selector": "span.ytd-thumbnail-overlay-time-status-renderer",
-                        "type": "text"
-                    },
-                    {
-                        "name": "thumbnail",
-                        "selector": "img.yt-core-image",
-                        "attribute": "src"
-                    },
-                    {
-                        "name": "description",
-                        "selector": "yt-formatted-string#description-text",
-                        "type": "text"
-                    }
-                ]
-            }
-            
-            extraction_strategy = JsonCssExtractionStrategy(schema)
-            
-            # Configure crawler to handle YouTube's dynamic loading
-            crawler_config = CrawlerRunConfig(
-                cache_mode=CacheMode.BYPASS,
-                extraction_strategy=extraction_strategy,
-                wait_for="css:ytd-video-renderer",  # Wait for video results
-                js_code="""
-                // Scroll to load more results
-                let scrollCount = 0;
-                const maxScrolls = Math.ceil(%d / 20);  // YouTube loads ~20 videos per scroll
-                
-                const scrollInterval = setInterval(() => {
-                    window.scrollTo(0, document.documentElement.scrollHeight);
-                    scrollCount++;
-                    
-                    if (scrollCount >= maxScrolls) {
-                        clearInterval(scrollInterval);
-                    }
-                }, 2000);
-                
-                // Wait for scrolling to complete
-                await new Promise(resolve => setTimeout(resolve, maxScrolls * 2000 + 1000));
-                """ % max_results
-            )
-            
-            # Scrape YouTube search results
-            async with AsyncWebCrawler(config=self.browser_config) as crawler:
-                result = await crawler.arun(
-                    url=search_url,
-                    config=crawler_config
-                )
-                
-                if result.success and result.extracted_content:
-                    videos = json.loads(result.extracted_content)
-                    
-                    # Process and clean video data
-                    processed_videos = []
-                    for video in videos[:max_results]:
-                        processed_video = self._process_video_data(video)
-                        if processed_video:
-                            processed_videos.append(processed_video)
-                    
-                    logger.info(f"✅ Found {len(processed_videos)} videos on YouTube")
-                    return processed_videos
-                else:
-                    logger.warning("❌ Failed to extract YouTube search results")
-                    return []
-                    
-        except Exception as e:
-            logger.error(f"❌ YouTube search error: {str(e)}")
-            return []
-    
-    async def scrape_channel(self, channel_url: str) -> Dict[str, Any]:
-        """
-        Scrape YouTube channel information
-        
-        Args:
-            channel_url: YouTube channel URL
-            
-        Returns:
-            Channel data dictionary
-        """
-        logger.info(f"📺 Scraping YouTube channel: {channel_url}")
-        
-        try:
-            # Convert to about page for more info
-            about_url = channel_url.rstrip('/') + '/about'
-            
-            # Schema for channel data extraction
-            schema = {
-                "name": "YouTube Channel",
-                "fields": [
-                    {
-                        "name": "channel_name",
-                        "selector": "yt-formatted-string.ytd-channel-name",
-                        "type": "text"
-                    },
-                    {
-                        "name": "subscriber_count",
-                        "selector": "#subscriber-count",
-                        "type": "text"
-                    },
-                    {
-                        "name": "description",
-                        "selector": "#description-container yt-formatted-string",
-                        "type": "text"
-                    },
-                    {
-                        "name": "join_date",
-                        "selector": "#right-column yt-formatted-string:contains('Joined')",
-                        "type": "text"
-                    },
-                    {
-                        "name": "view_count",
-                        "selector": "#right-column yt-formatted-string:contains('views')",
-                        "type": "text"
-                    }
-                ]
-            }
-            
-            extraction_strategy = JsonCssExtractionStrategy(schema)
-            
-            crawler_config = CrawlerRunConfig(
-                cache_mode=CacheMode.BYPASS,
-                extraction_strategy=extraction_strategy,
-                wait_for="css:#description-container",
-                js_code="""
-                // Click on channel links to reveal social media
-                const linksButton = document.querySelector('button[aria-label*="Links"]');
-                if (linksButton) linksButton.click();
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                """
-            )
-            
-            async with AsyncWebCrawler(config=self.browser_config) as crawler:
-                result = await crawler.arun(
-                    url=about_url,
-                    config=crawler_config
-                )
-                
-                if result.success:
-                    # Extract channel data
-                    channel_data = {}
-                    if result.extracted_content:
-                        channel_data = json.loads(result.extracted_content)
-                    
-                    # Extract social links from HTML
-                    social_links = self._extract_channel_social_links(result.html)
-                    channel_data['social_links'] = social_links
-                    
-                    # Parse channel ID from URL
-                    channel_id_match = re.search(r'/channel/([^/]+)', channel_url)
-                    if channel_id_match:
-                        channel_data['channel_id'] = channel_id_match.group(1)
-                    
-                    logger.info(f"✅ Scraped channel: {channel_data.get('channel_name', 'Unknown')}")
-                    return channel_data
-                else:
-                    logger.warning("❌ Failed to scrape YouTube channel")
-                    return {}
-                    
-        except Exception as e:
-            logger.error(f"❌ Channel scraping error: {str(e)}")
-            return {}
-    
-    async def get_video_details(self, video_id: str) -> Dict[str, Any]:
-        """
-        Get detailed information about a specific video
-        
-        Args:
-            video_id: YouTube video ID
-            
-        Returns:
-            Video details dictionary
-        """
-        video_url = f"https://www.youtube.com/watch?v={video_id}"
-        logger.info(f"🎥 Getting details for video: {video_id}")
-        
-        try:
-            # Schema for video details
-            schema = {
-                "name": "Video Details",
-                "fields": [
-                    {
-                        "name": "title",
-                        "selector": "h1.ytd-video-primary-info-renderer",
-                        "type": "text"
-                    },
-                    {
-                        "name": "views",
-                        "selector": ".view-count",
-                        "type": "text"
-                    },
-                    {
-                        "name": "likes",
-                        "selector": "yt-formatted-string.ytd-toggle-button-renderer:first-child",
-                        "type": "text"
-                    },
-                    {
-                        "name": "upload_date",
-                        "selector": "#info-strings yt-formatted-string",
-                        "type": "text"
-                    },
-                    {
-                        "name": "description",
-                        "selector": "#description yt-formatted-string",
-                        "type": "text"
-                    }
-                ]
-            }
-            
-            extraction_strategy = JsonCssExtractionStrategy(schema)
-            
-            crawler_config = CrawlerRunConfig(
-                cache_mode=CacheMode.BYPASS,
-                extraction_strategy=extraction_strategy,
-                wait_for="css:h1.ytd-video-primary-info-renderer",
-                js_code="""
-                // Expand description
-                const showMoreButton = document.querySelector('tp-yt-paper-button#expand');
-                if (showMoreButton) showMoreButton.click();
-                await new Promise(resolve => setTimeout(resolve, 500));
-                """
-            )
-            
-            async with AsyncWebCrawler(config=self.browser_config) as crawler:
-                result = await crawler.arun(
-                    url=video_url,
-                    config=crawler_config
-                )
-                
-                if result.success and result.extracted_content:
-                    video_details = json.loads(result.extracted_content)
-                    video_details['video_id'] = video_id
-                    video_details['url'] = video_url
-                    
-                    # Extract social links from description
-                    if video_details.get('description'):
-                        social_links = self._extract_social_links_from_text(video_details['description'])
-                        video_details['social_links'] = social_links
-                    
-                    logger.info(f"✅ Got details for: {video_details.get('title', 'Unknown')}")
-                    return video_details
-                else:
-                    logger.warning("❌ Failed to get video details")
-                    return {}
-                    
-        except Exception as e:
-            logger.error(f"❌ Video details error: {str(e)}")
-            return {}
-    
-    def _build_youtube_search_url(self, query: str, upload_date: str, duration: str, sort_by: str) -> str:
-        """Build YouTube search URL with filters"""
-        base_url = "https://www.youtube.com/results"
-        params = {"search_query": query}
-        
-        # Add filter parameters
-        filters = []
-        
-        # Upload date filter
-        upload_map = {
-            "today": "EgQIARAB",
-            "week": "EgQIAxAB", 
-            "month": "EgQIBBAB",
-            "year": "EgQIBRAB"
-        }
-        if upload_date in upload_map:
-            filters.append(upload_map[upload_date])
-        
-        # Duration filter
-        duration_map = {
-            "short": "EgQYAQ%3D%3D",
-            "long": "EgQYAw%3D%3D"
-        }
-        if duration in duration_map:
-            filters.append(duration_map[duration])
-        
-        # Sort filter
-        sort_map = {
-            "date": "CAI%3D",
-            "views": "CAM%3D",
-            "rating": "CAE%3D"
-        }
-        if sort_by in sort_map:
-            filters.append(sort_map[sort_by])
-        
-        # Combine filters
-        if filters:
-            params["sp"] = "".join(filters)
-        
-        return f"{base_url}?{urllib.parse.urlencode(params)}"
-    
-    def _process_video_data(self, raw_video: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Process and clean raw video data"""
-        try:
-            # Skip if missing essential data
-            if not raw_video.get('video_id') or not raw_video.get('title'):
-                return None
-            
-            # Parse view count
-            view_count = 0
-            views_text = raw_video.get('views', '')
-            if views_text:
-                # Extract number from "1.2M views" format
-                views_match = re.search(r'([\d.]+)([KMB]?)', views_text.replace(',', ''))
-                if views_match:
-                    number = float(views_match.group(1))
-                    multiplier = {'K': 1000, 'M': 1000000, 'B': 1000000000}.get(views_match.group(2), 1)
-                    view_count = int(number * multiplier)
-            
-            # Parse duration to seconds
-            duration_seconds = 0
-            duration_text = raw_video.get('duration', '')
-            if duration_text:
-                time_parts = duration_text.split(':')
-                if len(time_parts) == 2:
-                    duration_seconds = int(time_parts[0]) * 60 + int(time_parts[1])
-                elif len(time_parts) == 3:
-                    duration_seconds = int(time_parts[0]) * 3600 + int(time_parts[1]) * 60 + int(time_parts[2])
-            
-            # Extract channel ID from URL
-            channel_id = ''
-            channel_url = raw_video.get('channel_url', '')
-            if channel_url:
-                channel_match = re.search(r'/channel/([^/]+)', channel_url)
-                if channel_match:
-                    channel_id = channel_match.group(1)
-            
-            # Build processed video data
-            return {
-                'video_id': raw_video['video_id'],
-                'title': raw_video['title'],
-                'channel_title': raw_video.get('channel_title', ''),
-                'channel_id': channel_id,
-                'channel_url': f"https://www.youtube.com{channel_url}" if channel_url.startswith('/') else channel_url,
-                'view_count': view_count,
-                'published_at': raw_video.get('published', ''),
-                'duration': duration_text,
-                'duration_seconds': duration_seconds,
-                'thumbnail': raw_video.get('thumbnail', ''),
-                'description': raw_video.get('description', ''),
-                'extracted_artist_name': self._extract_artist_name(raw_video['title'])
-            }
-            
-        except Exception as e:
-            logger.error(f"Error processing video data: {e}")
-            return None
-    
-    def _extract_artist_name(self, title: str) -> Optional[str]:
-        """Extract artist name from video title"""
-        # Common patterns for music videos
-        patterns = [
-            r'^([^-–—]+?)\s*[-–—]\s*',  # "Artist - Song"
-            r'^([^|]+?)\s*\|\s*',  # "Artist | Song"
-            r'^([^:]+?)\s*:\s*',  # "Artist: Song"
-            r'^([^"]+?)\s*"',  # 'Artist "Song"'
-            r'^([^(]+?)\s*\(',  # "Artist (Official Video)"
+        # Multiple search strategies (ordered by complexity)
+        search_strategies = [
+            self._search_with_basic_config,  # Start with basic approach
+            self._search_with_magic_mode,
+            self._search_with_extended_stealth,
+            self._search_with_mobile_emulation
         ]
         
-        for pattern in patterns:
-            match = re.search(pattern, title)
-            if match:
-                artist = match.group(1).strip()
-                # Clean up common suffixes
-                artist = re.sub(r'\s*(Official|Music|Video|Audio|Lyric|Visualizer).*$', '', artist, flags=re.IGNORECASE)
-                return artist.strip()
+        for strategy_index, strategy in enumerate(search_strategies):
+            logger.info(f"Attempting YouTube search with strategy {strategy_index + 1}: {strategy.__name__}")
+            
+            try:
+                result = await strategy(query, max_results, upload_date)
+                if result.success and result.videos:
+                    return result
+                else:
+                    logger.warning(f"Strategy {strategy_index + 1} failed: {result.error_message}")
+                    error_message = result.error_message
+                    
+            except Exception as e:
+                logger.error(f"Strategy {strategy_index + 1} exception: {str(e)}")
+                error_message = str(e)
+                
+            # Random delay between strategies
+            await asyncio.sleep(random.uniform(3.0, 8.0))
         
-        return None
-    
-    def _extract_social_links_from_text(self, text: str) -> Dict[str, str]:
-        """Extract social media links from text"""
-        social_links = {}
+        return YouTubeSearchResult(
+            query=query,
+            videos=videos,
+            total_results=0,
+            success=success,
+            error_message=error_message or "All search strategies failed"
+        )
+
+    async def _search_with_basic_config(self, query: str, max_results: int, upload_date: str) -> YouTubeSearchResult:
+        """Search using basic configuration without advanced features."""
+        try:
+            browser_config = BrowserConfig(
+                browser_type="chromium",
+                headless=True,
+                viewport_width=1280,
+                viewport_height=720,
+                java_script_enabled=True,
+                ignore_https_errors=True
+            )
+            
+            crawler_config = CrawlerRunConfig(
+                cache_mode=CacheMode.BYPASS,
+                wait_until="domcontentloaded",
+                page_timeout=30000,
+                delay_before_return_html=2.0,
+                verbose=True
+            )
+            
+            search_url = self._build_search_url(query, upload_date)
+            
+            async with AsyncWebCrawler(config=browser_config) as crawler:
+                await asyncio.sleep(random.uniform(1.0, 3.0))
+                
+                result = await crawler.arun(url=search_url, config=crawler_config)
+                
+                if not result.success:
+                    return YouTubeSearchResult(
+                        query=query, videos=[], total_results=0,
+                        success=False, error_message=f"Basic config crawl failed: {result.error_message}"
+                    )
+                
+                videos = await self._extract_videos_from_html(result.html, max_results)
+                
+                return YouTubeSearchResult(
+                    query=query,
+                    videos=videos,
+                    total_results=len(videos),
+                    success=len(videos) > 0,
+                    error_message=None if videos else "No videos extracted from basic config"
+                )
+                
+        except Exception as e:
+            return YouTubeSearchResult(
+                query=query, videos=[], total_results=0,
+                success=False, error_message=f"Basic config exception: {str(e)}"
+            )
+
+    async def _search_with_magic_mode(self, query: str, max_results: int, upload_date: str) -> YouTubeSearchResult:
+        """Search using magic mode with full automation."""
+        browser_config = await self.get_browser_config()
+        crawler_config = await self.get_crawler_config()
         
-        patterns = {
-            'instagram': r'(?:instagram\.com|instagr\.am)/([A-Za-z0-9_.]+)',
-            'tiktok': r'tiktok\.com/@([A-Za-z0-9_.]+)',
-            'spotify': r'open\.spotify\.com/artist/([A-Za-z0-9]+)',
-            'twitter': r'(?:twitter\.com|x\.com)/([A-Za-z0-9_]+)',
-            'facebook': r'facebook\.com/([A-Za-z0-9.]+)'
-        }
+        # Ensure magic mode is enabled
+        crawler_config.magic = True
         
-        for platform, pattern in patterns.items():
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                username = match.group(1)
-                if platform == 'spotify':
-                    social_links[platform] = f"https://open.spotify.com/artist/{username}"
-                elif platform == 'instagram':
-                    social_links[platform] = f"https://instagram.com/{username}"
-                elif platform == 'tiktok':
-                    social_links[platform] = f"https://tiktok.com/@{username}"
-                elif platform == 'twitter':
-                    social_links[platform] = f"https://x.com/{username}"
-                elif platform == 'facebook':
-                    social_links[platform] = f"https://facebook.com/{username}"
+        search_url = self._build_search_url(query, upload_date)
         
-        return social_links
-    
-    def _extract_channel_social_links(self, html: str) -> Dict[str, str]:
-        """Extract social links from channel about page HTML"""
-        social_links = {}
+        async with AsyncWebCrawler(config=browser_config) as crawler:
+            # Add random pre-search delay
+            await asyncio.sleep(random.uniform(1.0, 3.0))
+            
+            result = await crawler.arun(url=search_url, config=crawler_config)
+            
+            if not result.success:
+                return YouTubeSearchResult(
+                    query=query, videos=[], total_results=0, 
+                    success=False, error_message=f"Magic mode crawl failed: {result.error_message}"
+                )
+            
+            videos = await self._extract_videos_from_html(result.html, max_results)
+            
+            return YouTubeSearchResult(
+                query=query,
+                videos=videos,
+                total_results=len(videos),
+                success=len(videos) > 0,
+                error_message=None if videos else "No videos extracted from magic mode"
+            )
+
+    async def _search_with_extended_stealth(self, query: str, max_results: int, upload_date: str) -> YouTubeSearchResult:
+        """Search with extended stealth features and interaction simulation."""
+        browser_config = await self.get_browser_config()
+        crawler_config = await self.get_crawler_config()
         
-        # Look for link elements in the channel links section
-        link_pattern = r'<a[^>]*href="([^"]+)"[^>]*>([^<]+)</a>'
-        matches = re.findall(link_pattern, html)
+        # Enhanced stealth settings
+        crawler_config.simulate_user = True
+        crawler_config.override_navigator = True
+        crawler_config.magic = True
+        crawler_config.scan_full_page = True
         
-        for url, text in matches:
-            if 'instagram.com' in url:
-                social_links['instagram'] = url
-            elif 'tiktok.com' in url:
-                social_links['tiktok'] = url
-            elif 'spotify.com' in url:
-                social_links['spotify'] = url
-            elif 'twitter.com' in url or 'x.com' in url:
-                social_links['twitter'] = url
-            elif 'facebook.com' in url:
-                social_links['facebook'] = url
-            elif url.startswith('http') and 'youtube' not in url:
-                # Potential artist website
-                if 'website' not in social_links:
-                    social_links['website'] = url
+        # Extended JavaScript for human-like behavior
+        human_behavior_js = """
+        (function() {
+            // Simulate human-like behavior
+            var delay = function(ms) { 
+                return new Promise(function(resolve) { 
+                    setTimeout(resolve, ms); 
+                }); 
+            };
+            
+            // Random mouse movements
+            var simulateMouseMovement = function() {
+                var event = new MouseEvent('mousemove', {
+                    clientX: Math.random() * window.innerWidth,
+                    clientY: Math.random() * window.innerHeight
+                });
+                document.dispatchEvent(event);
+            };
+            
+            // Simulate scroll behavior
+            var simulateScroll = function() {
+                return new Promise(function(resolve) {
+                    var i = 0;
+                    var scrollStep = function() {
+                        if (i < 3) {
+                            window.scrollBy(0, Math.random() * 500 + 200);
+                            i++;
+                            setTimeout(scrollStep, Math.random() * 1000 + 500);
+                        } else {
+                            resolve();
+                        }
+                    };
+                    scrollStep();
+                });
+            };
+            
+            // Execute human simulation
+            delay(Math.random() * 2000 + 1000).then(function() {
+                simulateMouseMovement();
+                return delay(Math.random() * 1000 + 500);
+            }).then(function() {
+                return simulateScroll();
+            }).then(function() {
+                return delay(Math.random() * 2000 + 1000);
+            });
+        })();
+        """
         
-        return social_links 
+        crawler_config.js_code = human_behavior_js
+        
+        search_url = self._build_search_url(query, upload_date)
+        
+        async with AsyncWebCrawler(config=browser_config) as crawler:
+            await asyncio.sleep(random.uniform(2.0, 4.0))
+            
+            result = await crawler.arun(url=search_url, config=crawler_config)
+            
+            if not result.success:
+                return YouTubeSearchResult(
+                    query=query, videos=[], total_results=0,
+                    success=False, error_message=f"Extended stealth crawl failed: {result.error_message}"
+                )
+            
+            videos = await self._extract_videos_from_html(result.html, max_results)
+            
+            return YouTubeSearchResult(
+                query=query,
+                videos=videos,
+                total_results=len(videos),
+                success=len(videos) > 0,
+                error_message=None if videos else "No videos extracted from extended stealth"
+            )
+
+    async def _search_with_mobile_emulation(self, query: str, max_results: int, upload_date: str) -> YouTubeSearchResult:
+        """Search using mobile emulation to avoid desktop bot detection."""
+        # Mobile-specific browser config
+        browser_config = BrowserConfig(
+            browser_type="chromium",
+            headless=True,
+            viewport_width=375,  # iPhone viewport
+            viewport_height=667,
+            user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+            java_script_enabled=True,
+            ignore_https_errors=True,
+            extra_args=[
+                "--no-sandbox",
+                "--disable-blink-features=AutomationControlled",
+                "--user-agent=Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+            ]
+        )
+        
+        # Mobile-specific crawler config
+        crawler_config = CrawlerRunConfig(
+            magic=True,
+            simulate_user=True,
+            remove_overlay_elements=True,
+            delay_before_return_html=random.uniform(3.0, 6.0),
+            wait_until="networkidle",
+            page_timeout=90000,
+            cache_mode=CacheMode.BYPASS,
+            verbose=True
+        )
+        
+        # Use mobile YouTube URL
+        mobile_search_url = f"https://m.youtube.com/results?search_query={quote_plus(query)}"
+        if upload_date != "all":
+            date_map = {
+                "hour": "EgIIAQ%253D%253D",
+                "today": "EgIIAg%253D%253D", 
+                "week": "EgIIAw%253D%253D",
+                "month": "EgIIBA%253D%253D",
+                "year": "EgIIBQ%253D%253D"
+            }
+            if upload_date in date_map:
+                mobile_search_url += f"&sp={date_map[upload_date]}"
+        
+        async with AsyncWebCrawler(config=browser_config) as crawler:
+            await asyncio.sleep(random.uniform(1.5, 3.5))
+            
+            result = await crawler.arun(url=mobile_search_url, config=crawler_config)
+            
+            if not result.success:
+                return YouTubeSearchResult(
+                    query=query, videos=[], total_results=0,
+                    success=False, error_message=f"Mobile emulation crawl failed: {result.error_message}"
+                )
+            
+            videos = await self._extract_videos_from_html(result.html, max_results, mobile=True)
+            
+            return YouTubeSearchResult(
+                query=query,
+                videos=videos,
+                total_results=len(videos),
+                success=len(videos) > 0,
+                error_message=None if videos else "No videos extracted from mobile emulation"
+            )
+
+    def _build_search_url(self, query: str, upload_date: str = "all") -> str:
+        """Build YouTube search URL with filters."""
+        base_url = f"https://www.youtube.com/results?search_query={quote_plus(query)}"
+        
+        if upload_date != "all":
+            # YouTube search filter parameters
+            date_filters = {
+                "hour": "EgIIAQ%253D%253D",
+                "today": "EgIIAg%253D%253D",
+                "week": "EgIIAw%253D%253D", 
+                "month": "EgIIBA%253D%253D",
+                "year": "EgIIBQ%253D%253D"
+            }
+            if upload_date in date_filters:
+                base_url += f"&sp={date_filters[upload_date]}"
+        
+        return base_url
+
+    async def _extract_videos_from_html(self, html: str, max_results: int, mobile: bool = False) -> List[YouTubeVideo]:
+        """Extract video information from HTML using multiple selector strategies."""
+        videos = []
+        
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # Different extraction strategies for mobile vs desktop
+            if mobile:
+                video_containers = self._find_mobile_video_containers(soup)
+            else:
+                video_containers = self._find_desktop_video_containers(soup)
+            
+            logger.info(f"Found {len(video_containers)} video containers")
+            
+            for container in video_containers[:max_results]:
+                try:
+                    video = await self._extract_video_from_container(container, mobile)
+                    if video and video.title and video.url:
+                        videos.append(video)
+                        if len(videos) >= max_results:
+                            break
+                except Exception as e:
+                    logger.warning(f"Failed to extract video from container: {e}")
+                    continue
+            
+            logger.info(f"Successfully extracted {len(videos)} videos")
+            
+        except Exception as e:
+            logger.error(f"Error extracting videos from HTML: {e}")
+        
+        return videos
+
+    def _find_desktop_video_containers(self, soup) -> list:
+        """Find video containers in desktop YouTube."""
+        containers = []
+        
+        for selector in self.selectors['videos']:
+            found = soup.select(selector)
+            if found:
+                containers.extend(found)
+                logger.info(f"Found {len(found)} containers with selector: {selector}")
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_containers = []
+        for container in containers:
+            container_id = str(container)[:100]  # Use first 100 chars as ID
+            if container_id not in seen:
+                seen.add(container_id)
+                unique_containers.append(container)
+        
+        return unique_containers
+
+    def _find_mobile_video_containers(self, soup) -> list:
+        """Find video containers in mobile YouTube."""
+        mobile_selectors = [
+            '.large-media-item',
+            '.compact-media-item', 
+            '.media-item-renderer',
+            '[data-context-item-id]',
+            'div[class*="video"]'
+        ]
+        
+        containers = []
+        for selector in mobile_selectors:
+            found = soup.select(selector)
+            if found:
+                containers.extend(found)
+        
+        return containers
+
+    async def _extract_video_from_container(self, container, mobile: bool = False) -> Optional[YouTubeVideo]:
+        """Extract video information from a container element."""
+        try:
+            # Extract title with multiple fallback strategies
+            title = None
+            for selector in self.selectors['title']:
+                title_elem = container.select_one(selector)
+                if title_elem:
+                    title = title_elem.get('title') or title_elem.get('aria-label') or title_elem.get_text(strip=True)
+                    if title:
+                        break
+            
+            if not title:
+                return None
+            
+            # Extract URL
+            url = None
+            link_elem = container.select_one('a[href*="/watch"]')
+            if link_elem:
+                href = link_elem.get('href')
+                if href:
+                    if href.startswith('/'):
+                        url = f"https://www.youtube.com{href}"
+                    else:
+                        url = href
+            
+            if not url:
+                return None
+            
+            # Extract channel name
+            channel_name = None
+            for selector in self.selectors['channel']:
+                channel_elem = container.select_one(selector)
+                if channel_elem:
+                    channel_name = channel_elem.get_text(strip=True)
+                    if channel_name:
+                        break
+            
+            # Extract view count
+            view_count = None
+            for selector in self.selectors['views']:
+                views_elem = container.select_one(selector)
+                if views_elem:
+                    view_text = views_elem.get_text(strip=True)
+                    if 'view' in view_text.lower():
+                        view_count = view_text
+                        break
+            
+            # Extract duration
+            duration = None
+            for selector in self.selectors['duration']:
+                duration_elem = container.select_one(selector)
+                if duration_elem:
+                    duration = duration_elem.get_text(strip=True)
+                    if duration and ':' in duration:
+                        break
+            
+            # Extract upload date
+            upload_date = None
+            for selector in self.selectors['upload_date']:
+                date_elem = container.select_one(selector)
+                if date_elem:
+                    date_text = date_elem.get_text(strip=True)
+                    if 'ago' in date_text.lower():
+                        upload_date = date_text
+                        break
+            
+            return YouTubeVideo(
+                title=title.strip(),
+                url=url,
+                channel_name=channel_name.strip() if channel_name else "Unknown",
+                view_count=view_count.strip() if view_count else "0 views",
+                duration=duration.strip() if duration else "Unknown",
+                upload_date=upload_date.strip() if upload_date else "Unknown"
+            )
+            
+        except Exception as e:
+            logger.warning(f"Error extracting video data: {e}")
+            return None
+
+    def get_cost_estimate(self, expected_videos: int) -> float:
+        """Estimate costs for video discovery operations."""
+        # Crawl4AI doesn't have direct API costs, just estimate infrastructure
+        return 0.0  # Free for now, could add server/bandwidth costs later 

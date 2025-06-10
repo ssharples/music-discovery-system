@@ -10,13 +10,16 @@ from app.models.artist import (
 )
 from app.core.dependencies import get_pipeline_deps, PipelineDependencies
 from app.agents.orchestrator import DiscoveryOrchestrator
-from app.agents.youtube_agent import YouTubeDiscoveryAgent
+from app.api.master_discovery import router as master_discovery_router
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Global flag to control enrichment version
-USE_V2_ENRICHMENT = True
+# Include master discovery router
+router.include_router(master_discovery_router)
+
+# Global flag to control workflow engine - prioritize MasterDiscoveryAgent
+USE_MASTER_WORKFLOW = True
 
 @router.post("/discover", response_model=DiscoveryResponse)
 async def start_discovery(
@@ -24,7 +27,7 @@ async def start_discovery(
     background_tasks: BackgroundTasks,
     deps: PipelineDependencies = Depends(get_pipeline_deps)
 ):
-    """Start a new discovery session"""
+    """Start a new discovery session using the optimized MasterDiscoveryAgent workflow"""
     logger.info(f"🚀 Discovery request received: query='{request.search_query}', max_results={request.max_results}")
     logger.info(f"🔍 Request object: {request}")
     logger.info(f"🔍 Dependencies: {deps}")
@@ -32,8 +35,9 @@ async def start_discovery(
     
     try:
         logger.info("⚡ About to create DiscoveryOrchestrator instance...")
-        orchestrator = DiscoveryOrchestrator(use_v2_enrichment=USE_V2_ENRICHMENT)
-        logger.info(f"✅ DiscoveryOrchestrator created successfully (V2 enrichment: {USE_V2_ENRICHMENT})")
+        # Use MasterDiscoveryAgent as primary workflow
+        orchestrator = DiscoveryOrchestrator(use_master_workflow=USE_MASTER_WORKFLOW)
+        logger.info(f"✅ DiscoveryOrchestrator created successfully (Master workflow: {USE_MASTER_WORKFLOW})")
         
         logger.info("⚡ About to start discovery session...")
         session_id = await orchestrator.start_discovery_session(
@@ -45,7 +49,7 @@ async def start_discovery(
         response = DiscoveryResponse(
             session_id=session_id,
             status="started",
-            message="Discovery session started successfully"
+            message=f"Discovery session started with {'MasterDiscoveryAgent' if USE_MASTER_WORKFLOW else 'Legacy'} workflow"
         )
         logger.info(f"✅ Response created: {response}")
         return response
@@ -59,7 +63,7 @@ async def discover_undiscovered_talent(
     deps: PipelineDependencies = Depends(get_pipeline_deps)
 ):
     """
-    Discover undiscovered talent with specific criteria:
+    Discover undiscovered talent using the optimized MasterDiscoveryAgent workflow:
     - Official music videos uploaded in the last 24 hours
     - Videos with less than 50k views
     - Independent/unsigned artists
@@ -67,7 +71,7 @@ async def discover_undiscovered_talent(
     logger.info(f"🎯 Undiscovered talent discovery request: max_results={max_results}")
     
     try:
-        orchestrator = DiscoveryOrchestrator(use_v2_enrichment=USE_V2_ENRICHMENT)
+        orchestrator = DiscoveryOrchestrator(use_master_workflow=USE_MASTER_WORKFLOW)
         result = await orchestrator.discover_undiscovered_talent(
             deps=deps,
             max_results=max_results
@@ -225,7 +229,7 @@ async def pause_discovery_session(
     """Pause a running discovery session"""
     try:
         from app.agents.orchestrator import DiscoveryOrchestrator
-        orchestrator = DiscoveryOrchestrator(use_v2_enrichment=USE_V2_ENRICHMENT)
+        orchestrator = DiscoveryOrchestrator(use_master_workflow=USE_MASTER_WORKFLOW)
         result = await orchestrator.pause_session(str(session_id), deps)
         return result
     except Exception as e:
@@ -240,7 +244,7 @@ async def resume_discovery_session(
     """Resume a paused discovery session"""
     try:
         from app.agents.orchestrator import DiscoveryOrchestrator
-        orchestrator = DiscoveryOrchestrator(use_v2_enrichment=USE_V2_ENRICHMENT)
+        orchestrator = DiscoveryOrchestrator(use_master_workflow=USE_MASTER_WORKFLOW)
         result = await orchestrator.resume_session(str(session_id), deps)
         return result
     except Exception as e:
@@ -255,7 +259,7 @@ async def stop_discovery_session(
     """Stop a running discovery session"""
     try:
         from app.agents.orchestrator import DiscoveryOrchestrator
-        orchestrator = DiscoveryOrchestrator(use_v2_enrichment=USE_V2_ENRICHMENT)
+        orchestrator = DiscoveryOrchestrator(use_master_workflow=USE_MASTER_WORKFLOW)
         result = await orchestrator.stop_session(str(session_id), deps)
         return result
     except Exception as e:
@@ -269,7 +273,7 @@ async def get_session_status(
     """Get current status of a discovery session"""
     try:
         from app.agents.orchestrator import DiscoveryOrchestrator
-        orchestrator = DiscoveryOrchestrator(use_v2_enrichment=USE_V2_ENRICHMENT)
+        orchestrator = DiscoveryOrchestrator(use_master_workflow=USE_MASTER_WORKFLOW)
         result = await orchestrator.get_session_status(str(session_id))
         return result
     except Exception as e:
@@ -337,8 +341,8 @@ async def test_discovery(
         
         # Test 1: Basic orchestrator creation
         try:
-            orchestrator = DiscoveryOrchestrator(use_v2_enrichment=USE_V2_ENRICHMENT)
-            results["orchestrator_creation"] = f"success (V2 enrichment: {USE_V2_ENRICHMENT})"
+            orchestrator = DiscoveryOrchestrator(use_master_workflow=USE_MASTER_WORKFLOW)
+            results["orchestrator_creation"] = f"success (Master workflow: {USE_MASTER_WORKFLOW})"
         except Exception as e:
             results["orchestrator_creation"] = f"failed: {e}"
             return results

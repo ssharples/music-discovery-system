@@ -1,4 +1,3 @@
-# Supabase Configuration (REQUIRED)
 # Copy this to .env for local testing
 # Database Configuration
 SUPABASE_URL=https://aflxjobceqjpjftxwewp.supabase.co
@@ -39,6 +38,6 @@ BATCH_SIZE=50
 ENABLE_PARALLEL_PROCESSING=true
 
 # Content Filtering Configuration
-EXCLUDE_AI_KEYWORDS=["ai", "suno", "generated", "udio", "cover", "remix", "artificial intelligence", "ai-generated","remastered"]
-MIN_SUBSCRIBER_COUNT=100
-MIN_SPOTIFY_MONTHLY_LISTENERS=1000 
+EXCLUDE_AI_KEYWORDS=["ai", "suno", "generated", "udio", "cover", "remix", "artificial intelligence", "ai-generated"]
+MIN_SUBSCRIBER_COUNT=1000
+MIN_SPOTIFY_MONTHLY_LISTENERS=10000 
