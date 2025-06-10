@@ -44,17 +44,16 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY requirements.txt .
+COPY requirements-minimal.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && echo "📦 Installing requirements..." \
-    && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir -r requirements-minimal.txt \
     && echo "🔍 Verifying installations..." \
     && pip list | grep -E "(firecrawl|playwright|crawl4ai)" \
     && echo "🎭 Installing Playwright browsers..." \
     && playwright install chromium \
     && playwright install-deps chromium \
     && echo "🐍 Testing critical imports..." \
-    && python -c "import firecrawl; print('✅ Firecrawl imported successfully')" \
     && python -c "import crawl4ai; print('✅ Crawl4AI imported successfully')" \
     && python -c "from playwright.async_api import async_playwright; print('✅ Playwright imported successfully')" \
     && echo "✅ All dependencies and browsers installed successfully"

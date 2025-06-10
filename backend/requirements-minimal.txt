@@ -25,3 +25,5 @@ python-jose[cryptography]
 passlib[bcrypt]
 email-validator
 crawl4ai
+playwright
+firecrawl-py

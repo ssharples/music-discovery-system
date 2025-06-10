@@ -2,69 +2,80 @@
 version: '3.8'
 
 services:
-  music-discovery-backend:
-    build:
+  # Backend Service
+  backend:
+    build: 
       context: ./backend
       dockerfile: Dockerfile
-    container_name: music-discovery-api
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
+    # No external port needed - frontend nginx proxies internally
     environment:
+      - ENVIRONMENT=production
+      - DEBUG=false
+      
       # Database Configuration
       - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
       
       # External API Keys
+      - APIFY_API_TOKEN=${APIFY_API_TOKEN}
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
       - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
       - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
       - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
-      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-}
       
       # System Configuration
-      - ENVIRONMENT=production
-      - DEBUG=false
-      - ALLOWED_ORIGINS=["*"]
-      - LOG_LEVEL=INFO
+      - SECRET_KEY=${SECRET_KEY}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - SENTRY_DSN=${SENTRY_DSN}
       
-      # Playwright Configuration
+      # Playwright Configuration for production
       - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
       - PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
       
-      # Optional Services
-      - REDIS_URL=${REDIS_URL:-}
-      - SENTRY_DSN=${SENTRY_DSN:-}
-      
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    working_dir: /app
     volumes:
       # Persist Playwright browsers
       - playwright_browsers:/ms-playwright
-      
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 40s
-      
+      retries: 5
+      start_period: 60s
     networks:
-      - music-discovery-network
-      
-    # Resource limits for production
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: "1.0"
-        reservations:
-          memory: 1G
-          cpus: "0.5"
+      - music-discovery
+    labels:
+      - "coolify.managed=true"
+
+  # Frontend Service
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - music-discovery
+    labels:
+      - "coolify.managed=true"
 
 volumes:
   playwright_browsers:
     driver: local
 
 networks:
-  music-discovery-network:
+  music-discovery:
     driver: bridge
