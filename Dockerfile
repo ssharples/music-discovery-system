@@ -44,9 +44,9 @@ RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /usr/share/nginx/html
 
 # Create log directories and set permissions
-RUN mkdir -p /var/log/supervisor /var/log/nginx /var/lib/redis /var/run && \
-    chown -R appuser:appuser /var/log/supervisor /var/log/nginx /var/lib/redis && \
-    chmod -R 755 /var/log/supervisor /var/log/nginx && \
+RUN mkdir -p /var/log/supervisor /var/log/nginx /var/lib/redis /var/run /app/logs && \
+    chown -R appuser:appuser /var/log/supervisor /var/log/nginx /var/lib/redis /app/logs && \
+    chmod -R 755 /var/log/supervisor /var/log/nginx /app/logs && \
     chmod 777 /var/run
 
 # Health check

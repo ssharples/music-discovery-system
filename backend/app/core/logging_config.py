@@ -5,6 +5,8 @@ Filters out noise and enhances agentic workflow visibility
 
 import logging
 import logging.config
+import os
+from pathlib import Path
 from typing import Dict, Any
 
 class SupabaseFilter(logging.Filter):
@@ -35,6 +37,50 @@ class AgenticWorkflowFormatter(logging.Formatter):
 def setup_enhanced_logging():
     """Setup enhanced logging configuration"""
     
+    # Create logs directory first - handle both local and Docker paths
+    log_dir = Path("/app/logs")
+    if not log_dir.exists():
+        # Try relative path for local development
+        log_dir = Path("logs")
+    
+    # Ensure the directory exists
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file_path = log_dir / "agentic_workflows.log"
+    except (PermissionError, OSError) as e:
+        # Fallback to console-only logging if we can't create log files
+        print(f"Warning: Could not create log directory {log_dir}: {e}")
+        log_file_path = None
+    
+    # Build handlers dynamically based on what's available
+    handlers = {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'level': 'INFO',
+            'formatter': 'agentic_workflow',
+            'filters': ['supabase_filter'],
+            'stream': 'ext://sys.stdout'
+        }
+    }
+    
+    # Only add file handler if we can create the log file
+    if log_file_path:
+        handlers['file'] = {
+            'class': 'logging.FileHandler',
+            'level': 'DEBUG',
+            'formatter': 'agentic_workflow',
+            'filters': ['supabase_filter'],
+            'filename': str(log_file_path),
+            'mode': 'a'
+        }
+    
+    # Determine which handlers to use
+    agent_handlers = ['console']
+    httpx_handlers = ['console']
+    if log_file_path:
+        agent_handlers.append('file')
+        httpx_handlers = ['file']
+    
     config: Dict[str, Any] = {
         'version': 1,
         'disable_existing_loggers': False,
@@ -54,27 +100,11 @@ def setup_enhanced_logging():
                 '()': SupabaseFilter
             }
         },
-        'handlers': {
-            'console': {
-                'class': 'logging.StreamHandler',
-                'level': 'INFO',
-                'formatter': 'agentic_workflow',
-                'filters': ['supabase_filter'],
-                'stream': 'ext://sys.stdout'
-            },
-            'file': {
-                'class': 'logging.FileHandler',
-                'level': 'DEBUG',
-                'formatter': 'agentic_workflow',
-                'filters': ['supabase_filter'],
-                'filename': 'logs/agentic_workflows.log',
-                'mode': 'a'
-            }
-        },
+        'handlers': handlers,
         'loggers': {
             'app.agents': {
                 'level': 'DEBUG',
-                'handlers': ['console', 'file'],
+                'handlers': agent_handlers,
                 'propagate': False
             },
             'app.api': {
@@ -84,7 +114,7 @@ def setup_enhanced_logging():
             },
             'httpx': {
                 'level': 'WARNING',  # Reduce httpx noise
-                'handlers': ['file'],
+                'handlers': httpx_handlers,
                 'propagate': False
             }
         },
@@ -96,11 +126,13 @@ def setup_enhanced_logging():
     
     logging.config.dictConfig(config)
     
-    # Create logs directory if it doesn't exist
-    import os
-    os.makedirs('logs', exist_ok=True)
+    logger = logging.getLogger(__name__)
+    if log_file_path:
+        logger.info(f"Enhanced logging configured. Log file: {log_file_path}")
+    else:
+        logger.warning("File logging disabled - using console only")
     
-    return logging.getLogger(__name__)
+    return logger
 
 def get_progress_logger(name: str, total_items: int = None):
     """Get a logger with progress tracking capabilities"""
