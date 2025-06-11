@@ -66,18 +66,24 @@ class Crawl4AIEnrichmentAgent:
             discovery_metadata={"enrichment_timestamp": datetime.utcnow().isoformat()}
         )
         
-        # Parallel enrichment tasks (simplified for now)
+        # Parallel enrichment tasks
         tasks = []
         
-        # TODO: Re-enable enrichment methods after fixing structure
-        # For now, skip enrichment to prevent errors
-        logger.info(f"🔄 Skipping detailed enrichment for {artist_profile.name} - using basic profile")
+        # Spotify enrichment - search and enrich based on artist name
+        tasks.append(self._search_and_enrich_spotify(artist_profile.name, enriched_data))
+        
+        # Social media enrichment (if links available)
+        if hasattr(artist_profile, 'social_links') and artist_profile.social_links:
+            if 'instagram' in artist_profile.social_links:
+                tasks.append(self._enrich_instagram(artist_profile.social_links['instagram'], enriched_data))
+            if 'tiktok' in artist_profile.social_links:
+                tasks.append(self._enrich_tiktok(artist_profile.social_links['tiktok'], enriched_data))
         
         # Run all enrichments in parallel
         await asyncio.gather(*tasks, return_exceptions=True)
         
         # Calculate enrichment score and update profile
-        enriched_data.enrichment_score = min(0.8, 0.5)  # Simplified for now
+        enriched_data.enrichment_score = self._calculate_enrichment_score(enriched_data)
         enriched_data.profile.enrichment_score = enriched_data.enrichment_score
         
         logger.info(f"✅ Enrichment complete for {artist_profile.name} (score: {enriched_data.enrichment_score})")
@@ -148,25 +154,27 @@ class Crawl4AIEnrichmentAgent:
                     if result.extracted_content:
                         spotify_data = json.loads(result.extracted_content)
                         
-                        # Parse monthly listeners
+                        # Parse monthly listeners and update profile
                         if spotify_data.get('monthly_listeners'):
                             listeners_text = spotify_data['monthly_listeners']
-                            enriched_data.spotify_monthly_listeners = self._parse_number(listeners_text)
+                            monthly_listeners = self._parse_number(listeners_text)
+                            enriched_data.profile.follower_counts['spotify_monthly_listeners'] = monthly_listeners
                         
-                        # Store bio
+                        # Store bio in profile
                         if spotify_data.get('bio'):
-                            enriched_data.bio = spotify_data['bio'][:500]  # Limit bio length
+                            enriched_data.profile.bio = spotify_data['bio'][:500]  # Limit bio length
                     
-                    # Extract top tracks from HTML
+                    # Extract top tracks from HTML and store in metadata
                     tracks = self._extract_spotify_tracks(result.html)
                     if tracks:
-                        enriched_data.top_tracks = tracks[:5]  # Top 5 tracks
+                        enriched_data.profile.metadata['top_tracks'] = tracks[:5]  # Top 5 tracks
                         
-                        # Get lyrics for top tracks
+                        # Get lyrics for top tracks and analyze
                         if tracks:
                             await self._enrich_lyrics(enriched_data)
                     
-                    logger.info(f"✅ Spotify enrichment complete: {enriched_data.spotify_monthly_listeners} monthly listeners")
+                    monthly_listeners = enriched_data.profile.follower_counts.get('spotify_monthly_listeners', 0)
+                    logger.info(f"✅ Spotify enrichment complete: {monthly_listeners} monthly listeners")
                     
         except Exception as e:
             logger.error(f"❌ Spotify enrichment error: {str(e)}")
@@ -302,12 +310,12 @@ class Crawl4AIEnrichmentAgent:
                         try:
                             instagram_data = json.loads(result.extracted_content)
                             if instagram_data.get('follower_count_text'):
-                                enriched_data.instagram_followers = self._parse_number(instagram_data['follower_count_text'])
+                                enriched_data.profile.follower_counts['instagram'] = self._parse_number(instagram_data['follower_count_text'])
                         except:
                             pass
                     
                     # Fallback to regex patterns from HTML
-                    if not enriched_data.instagram_followers:
+                    if not enriched_data.profile.follower_counts.get('instagram'):
                         # Multiple patterns for Instagram data with enhanced validation
                         patterns = [
                             r'"edge_followed_by":\{"count":(\d+)\}',  # GraphQL API
@@ -331,16 +339,17 @@ class Crawl4AIEnrichmentAgent:
                                         
                                         # Validate reasonable follower count (not too low/high)
                                         if 0 < follower_count < 1000000000:  # Max 1B followers
-                                            enriched_data.instagram_followers = follower_count
+                                            enriched_data.profile.follower_counts['instagram'] = follower_count
                                             break
                                     
-                                    if enriched_data.instagram_followers:
+                                    if enriched_data.profile.follower_counts.get('instagram'):
                                         break
                                 except (ValueError, TypeError):
                                     continue
                     
-                    if enriched_data.instagram_followers:
-                        logger.info(f"✅ Instagram followers: {enriched_data.instagram_followers:,}")
+                    instagram_followers = enriched_data.profile.follower_counts.get('instagram', 0)
+                    if instagram_followers:
+                        logger.info(f"✅ Instagram followers: {instagram_followers:,}")
                     else:
                         logger.warning("⚠️ Could not extract Instagram follower count")
                     
@@ -415,14 +424,14 @@ class Crawl4AIEnrichmentAgent:
                         try:
                             tiktok_data = json.loads(result.extracted_content)
                             if tiktok_data.get('follower_count_text'):
-                                enriched_data.tiktok_followers = self._parse_number(tiktok_data['follower_count_text'])
+                                enriched_data.profile.follower_counts['tiktok'] = self._parse_number(tiktok_data['follower_count_text'])
                             if tiktok_data.get('likes_count_text'):
-                                enriched_data.tiktok_likes = self._parse_number(tiktok_data['likes_count_text'])
+                                enriched_data.profile.metadata['tiktok_likes'] = self._parse_number(tiktok_data['likes_count_text'])
                         except:
                             pass
                     
                     # Fallback to regex patterns from HTML
-                    if not enriched_data.tiktok_followers or not enriched_data.tiktok_likes:
+                    if not enriched_data.profile.follower_counts.get('tiktok') or not enriched_data.profile.metadata.get('tiktok_likes'):
                         # Multiple patterns for TikTok data
                         follower_patterns = [
                             r'"followerCount":(\d+)',  # JSON API
@@ -439,35 +448,37 @@ class Crawl4AIEnrichmentAgent:
                         ]
                         
                         # Extract followers
-                        if not enriched_data.tiktok_followers:
+                        if not enriched_data.profile.follower_counts.get('tiktok'):
                             for pattern in follower_patterns:
                                 match = re.search(pattern, result.html, re.IGNORECASE)
                                 if match:
                                     try:
                                         if pattern.startswith('"'):  # JSON patterns
-                                            enriched_data.tiktok_followers = int(match.group(1))
+                                            enriched_data.profile.follower_counts['tiktok'] = int(match.group(1))
                                         else:  # Text patterns
-                                            enriched_data.tiktok_followers = self._parse_number(match.group(1))
+                                            enriched_data.profile.follower_counts['tiktok'] = self._parse_number(match.group(1))
                                         break
                                     except ValueError:
                                         continue
                         
                         # Extract likes
-                        if not enriched_data.tiktok_likes:
+                        if not enriched_data.profile.metadata.get('tiktok_likes'):
                             for pattern in likes_patterns:
                                 match = re.search(pattern, result.html, re.IGNORECASE)
                                 if match:
                                     try:
                                         if pattern.startswith('"'):  # JSON patterns
-                                            enriched_data.tiktok_likes = int(match.group(1))
+                                            enriched_data.profile.metadata['tiktok_likes'] = int(match.group(1))
                                         else:  # Text patterns
-                                            enriched_data.tiktok_likes = self._parse_number(match.group(1))
+                                            enriched_data.profile.metadata['tiktok_likes'] = self._parse_number(match.group(1))
                                         break
                                     except ValueError:
                                         continue
                     
-                    if enriched_data.tiktok_followers or enriched_data.tiktok_likes:
-                        logger.info(f"✅ TikTok: {enriched_data.tiktok_followers or 0:,} followers, {enriched_data.tiktok_likes or 0:,} likes")
+                    tiktok_followers = enriched_data.profile.follower_counts.get('tiktok', 0)
+                    tiktok_likes = enriched_data.profile.metadata.get('tiktok_likes', 0)
+                    if tiktok_followers or tiktok_likes:
+                        logger.info(f"✅ TikTok: {tiktok_followers:,} followers, {tiktok_likes:,} likes")
                     else:
                         logger.warning("⚠️ Could not extract TikTok metrics")
                     
@@ -477,15 +488,16 @@ class Crawl4AIEnrichmentAgent:
     async def _enrich_lyrics(self, enriched_data: EnrichedArtistData):
         """Enrich with lyrics analysis from multiple sources"""
         try:
-            if not enriched_data.top_tracks:
+            top_tracks = enriched_data.profile.metadata.get('top_tracks', [])
+            if not top_tracks:
                 logger.info("No top tracks available for lyrics analysis")
                 return
             
             lyrics_analyses = []
             
-            for track in enriched_data.top_tracks[:3]:  # Analyze top 3 tracks
+            for track in top_tracks[:3]:  # Analyze top 3 tracks
                 track_name = track.get('name', '')
-                artist_name = enriched_data.name
+                artist_name = enriched_data.profile.name
                 
                 if not track_name or not artist_name:
                     continue
@@ -504,10 +516,11 @@ class Crawl4AIEnrichmentAgent:
                 else:
                     logger.warning(f"⚠️ Could not find lyrics for: {track_name}")
             
-            # Combine analyses
+            # Combine analyses and store in profile
             if lyrics_analyses:
-                enriched_data.lyrics_themes = self._combine_lyrics_analyses(lyrics_analyses)
-                logger.info(f"✅ Lyrics analysis complete: {enriched_data.lyrics_themes}")
+                themes = self._combine_lyrics_analyses(lyrics_analyses)
+                enriched_data.profile.metadata['lyrics_themes'] = themes
+                logger.info(f"✅ Lyrics analysis complete: {themes}")
             else:
                 logger.warning("⚠️ No lyrics analyses available")
                 
@@ -806,30 +819,28 @@ class Crawl4AIEnrichmentAgent:
     def _calculate_enrichment_score(self, data: EnrichedArtistData) -> float:
         """Calculate a 0-1 score representing data completeness"""
         score = 0.0
-        total_fields = 0
         
         # Spotify data (30% weight)
-        if data.spotify_monthly_listeners is not None:
+        if data.profile.follower_counts.get('spotify_monthly_listeners'):
             score += 0.15
-        if data.top_tracks:
+        if data.profile.metadata.get('top_tracks'):
             score += 0.15
-        total_fields += 2
         
         # Social media data (40% weight)
-        if data.instagram_followers is not None:
+        if data.profile.follower_counts.get('instagram'):
             score += 0.20
-        if data.tiktok_followers is not None:
+        if data.profile.follower_counts.get('tiktok'):
             score += 0.10
-        if data.tiktok_likes is not None:
+        if data.profile.metadata.get('tiktok_likes'):
             score += 0.10
-        total_fields += 3
         
-        # Content analysis (30% weight)
-        if data.lyrics_themes:
-            score += 0.20
-        if data.genres:
+        # Profile completeness (30% weight)
+        if data.profile.bio:
             score += 0.10
-        total_fields += 2
+        if data.profile.genres:
+            score += 0.10
+        if data.profile.social_links:
+            score += 0.10
         
         return min(score, 1.0)
     
