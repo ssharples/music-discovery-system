@@ -90,57 +90,32 @@ class Crawl4AIEnrichmentAgent:
         return enriched_data
     
     async def _enrich_spotify(self, artist_profile: ArtistProfile, enriched_data: EnrichedArtistData):
-        """Enrich with Spotify data using Crawl4AI"""
+        """Enrich with Spotify data using flexible extraction approach"""
         try:
             spotify_url = artist_profile.spotify_url
             if not spotify_url and artist_profile.spotify_id:
                 spotify_url = f"https://open.spotify.com/artist/{artist_profile.spotify_id}"
             
+            if not spotify_url:
+                logger.warning("⚠️ No Spotify URL available for enrichment")
+                return
+                
             logger.info(f"🎵 Crawling Spotify: {spotify_url}")
             
-            # Enhanced schema for Spotify artist page with current selectors
-            schema = {
-                "name": "Spotify Artist",
-                "fields": [
-                    {
-                        "name": "artist_name",
-                        "selector": "h1[data-testid='artist-name'], h1[data-testid='entityTitle'], .Type__TypeElement-goli40-0.glAFHu, .encore-text-headline-large, [data-testid='top-element'] h1",
-                        "type": "text"
-                    },
-                    {
-                        "name": "monthly_listeners",
-                        "selector": "div[data-testid='monthly-listeners'], .Type__TypeElement-goli40-0.kHXWsL, .monthly-listeners-label, span[data-testid='monthly-listeners-label']",
-                        "type": "text"
-                    },
-                    {
-                        "name": "bio",
-                        "selector": "div[data-testid='artist-biography'], [data-testid='about-artist'], .about-artist-text, .Type__TypeElement-goli40-0.isTruncated",
-                        "type": "text"
-                    },
-                    {
-                        "name": "verified",
-                        "selector": "[data-testid='verified-badge'], .verified-badge, .artist-verified",
-                        "type": "text"
-                    },
-                    {
-                        "name": "follower_count",
-                        "selector": "[data-testid='follower-count'], .follower-count-label, .Type__TypeElement-goli40-0.kHXWsL",
-                        "type": "text"
-                    }
-                ]
-            }
-            
-            extraction_strategy = JsonCssExtractionStrategy(schema)
-            
+            # Flexible crawler config - don't wait for specific elements
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
-                extraction_strategy=extraction_strategy,
-                wait_for="css:h1[data-testid='artist-name'], css:h1[data-testid='entityTitle'], css:.encore-text-headline-large",
+                wait_until="domcontentloaded",  # Don't wait for specific elements
+                page_timeout=15000,  # Shorter timeout
+                delay_before_return_html=4.0,  # Wait for content to load
                 js_code="""
-                // Scroll to load tracks
-                window.scrollTo(0, 1000);
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                """
+                // Wait for page load and scroll to load content
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                window.scrollTo(0, 500);
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                console.log('Spotify artist page loaded');
+                """,
+                verbose=True
             )
             
             async with AsyncWebCrawler(config=self.browser_config) as crawler:
@@ -149,76 +124,108 @@ class Crawl4AIEnrichmentAgent:
                     config=crawler_config
                 )
                 
-                if result.success:
-                    # Extract structured data
-                    if result.extracted_content:
-                        spotify_data = json.loads(result.extracted_content)
-                        
-                        # Parse monthly listeners and update profile
-                        if spotify_data.get('monthly_listeners'):
-                            listeners_text = spotify_data['monthly_listeners']
-                            monthly_listeners = self._parse_number(listeners_text)
-                            enriched_data.profile.follower_counts['spotify_monthly_listeners'] = monthly_listeners
-                        
-                        # Store bio in profile
-                        if spotify_data.get('bio'):
-                            enriched_data.profile.bio = spotify_data['bio'][:500]  # Limit bio length
+                if result.success and result.html:
+                    # Use regex patterns to extract data - more reliable than selectors
+                    import re
                     
-                    # Extract top tracks from HTML and store in metadata
+                    # Extract monthly listeners using multiple patterns
+                    monthly_listeners = 0
+                    listener_patterns = [
+                        r'([\d,]+)\s*monthly\s*listeners?',  # "X monthly listeners"
+                        r'monthly\s*listeners?[:\s]*([\d,]+)',  # "monthly listeners: X"
+                        r'"monthlyListeners":(\d+)',  # JSON data
+                        r'monthlyListeners["\s:]+(\d+)',  # Alternative JSON
+                        r'([\d,]+)\s*listeners\s*monthly',  # Alternative format
+                    ]
+                    
+                    for pattern in listener_patterns:
+                        matches = re.findall(pattern, result.html, re.IGNORECASE)
+                        if matches:
+                            try:
+                                # Take the first reasonable match
+                                for match in matches:
+                                    parsed = self._parse_number(match)
+                                    if 0 < parsed < 1000000000:  # Reasonable range
+                                        monthly_listeners = parsed
+                                        break
+                                if monthly_listeners > 0:
+                                    break
+                            except (ValueError, TypeError):
+                                continue
+                    
+                    if monthly_listeners > 0:
+                        enriched_data.profile.follower_counts['spotify_monthly_listeners'] = monthly_listeners
+                        logger.info(f"✅ Found {monthly_listeners:,} monthly listeners")
+                    else:
+                        logger.warning("⚠️ Could not extract Spotify monthly listeners")
+                    
+                    # Extract artist bio using patterns
+                    bio_patterns = [
+                        r'<div[^>]*data-testid[^>]*biography[^>]*>([^<]+)',
+                        r'<div[^>]*about[^>]*>([^<]+)',
+                        r'"biography":\s*"([^"]+)"',
+                        r'artist[_-]?bio[^>]*>([^<]+)',
+                        r'description[^>]*>([^<]+)',
+                    ]
+                    
+                    for pattern in bio_patterns:
+                        matches = re.findall(pattern, result.html, re.IGNORECASE | re.DOTALL)
+                        if matches:
+                            # Take first non-empty match
+                            for match in matches:
+                                clean_bio = re.sub(r'<[^>]+>', '', match).strip()
+                                if len(clean_bio) > 20:  # Reasonable bio length
+                                    enriched_data.profile.bio = clean_bio[:500]
+                                    logger.info("✅ Found artist bio")
+                                    break
+                            if enriched_data.profile.bio:
+                                break
+                    
+                    # Extract top tracks using patterns
                     tracks = self._extract_spotify_tracks(result.html)
                     if tracks:
-                        enriched_data.profile.metadata['top_tracks'] = tracks[:5]  # Top 5 tracks
+                        enriched_data.profile.metadata['top_tracks'] = tracks[:5]
+                        logger.info(f"✅ Found {len(tracks)} tracks")
                         
-                        # Get lyrics for top tracks and analyze
-                        if tracks:
-                            await self._enrich_lyrics(enriched_data)
+                        # Analyze lyrics for top tracks
+                        await self._enrich_lyrics(enriched_data)
                     
-                    monthly_listeners = enriched_data.profile.follower_counts.get('spotify_monthly_listeners', 0)
-                    logger.info(f"✅ Spotify enrichment complete: {monthly_listeners} monthly listeners")
+                    logger.info(f"✅ Spotify enrichment complete")
+                    
+                else:
+                    logger.warning(f"⚠️ Failed to load Spotify page: {spotify_url}")
                     
         except Exception as e:
             logger.error(f"❌ Spotify enrichment error: {str(e)}")
+            # Don't let Spotify errors break enrichment
+            logger.info("⚠️ Continuing without Spotify data")
     
     async def _search_and_enrich_spotify(self, artist_name: str, enriched_data: EnrichedArtistData):
-        """Search for artist on Spotify and enrich"""
+        """Search for artist on Spotify and enrich with robust fallback approach"""
         try:
             search_url = f"https://open.spotify.com/search/{artist_name.replace(' ', '%20')}/artists"
             logger.info(f"🔍 Searching Spotify for: {artist_name}")
             
-            # Enhanced schema for Spotify search results with current selectors
-            schema = {
-                "name": "Spotify Search",
-                "baseSelector": "div[data-testid='search-result-artist'], .artist-search-result, .search-result-item, .ContentItem__Container-sc-1qzj7v0-0",
-                "fields": [
-                    {
-                        "name": "artist_url",
-                        "selector": "a, .artist-link, [data-testid='card-click-handler']",
-                        "attribute": "href"
-                    },
-                    {
-                        "name": "artist_name",
-                        "selector": "a, .artist-name, .Type__TypeElement-goli40-0, .encore-text-title-small",
-                        "type": "text"
-                    },
-                    {
-                        "name": "verified",
-                        "selector": "[data-testid='verified-badge'], .verified-badge",
-                        "type": "text"
-                    },
-                    {
-                        "name": "follower_count",
-                        "selector": ".follower-count, .Type__TypeElement-goli40-0.kHXWsL",
-                        "type": "text"
-                    }
-                ]
-            }
-            
-            extraction_strategy = JsonCssExtractionStrategy(schema)
-            
+            # Flexible crawler config that doesn't depend on specific selectors
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
-                extraction_strategy=extraction_strategy,
-                wait_for="css:div[data-testid='search-result-artist']"
+                wait_until="domcontentloaded",  # Don't wait for specific elements
+                page_timeout=15000,  # Shorter timeout
+                delay_before_return_html=3.0,  # Wait for content to load
+                js_code="""
+                // Wait for page load and try to find any search results
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                
+                // Try to click "Show all" if it exists
+                const showAllButton = document.querySelector('[data-testid="show-all-button"], .show-all, button[class*="show"]');
+                if (showAllButton) {
+                    showAllButton.click();
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+                
+                console.log('Spotify search page loaded');
+                """,
+                verbose=True
             )
             
             async with AsyncWebCrawler(config=self.browser_config) as crawler:
@@ -227,25 +234,73 @@ class Crawl4AIEnrichmentAgent:
                     config=crawler_config
                 )
                 
-                if result.success and result.extracted_content:
-                    search_results = json.loads(result.extracted_content)
+                if result.success and result.html:
+                    # Use multiple extraction strategies - no specific selectors required
+                    artist_urls = []
                     
-                    # Find best match
-                    if search_results:
-                        best_match = search_results[0]  # Take first result
-                        artist_url = best_match.get('artist_url')
+                    # Strategy 1: Find artist profile links in HTML
+                    import re
+                    artist_link_patterns = [
+                        r'href="(/artist/[^"]+)"',  # Direct artist links
+                        r'"uri":"spotify:artist:([^"]+)"',  # Spotify URIs
+                        r'open\.spotify\.com/artist/([^"?&]+)',  # Full URLs
+                    ]
+                    
+                    for pattern in artist_link_patterns:
+                        matches = re.findall(pattern, result.html)
+                        for match in matches:
+                            if pattern.startswith('"uri"'):
+                                artist_urls.append(f"https://open.spotify.com/artist/{match}")
+                            elif match.startswith('/artist/'):
+                                artist_urls.append(f"https://open.spotify.com{match}")
+                            else:
+                                artist_urls.append(f"https://open.spotify.com/artist/{match}")
+                    
+                    # Strategy 2: Look for any links containing the artist name
+                    if not artist_urls:
+                        name_pattern = re.escape(artist_name.lower())
+                        name_links = re.findall(r'href="([^"]*artist[^"]*)"[^>]*>[^<]*' + name_pattern, result.html, re.IGNORECASE)
+                        artist_urls.extend([url for url in name_links if 'spotify.com' in url])
+                    
+                    # Use the first found artist URL
+                    if artist_urls:
+                        artist_url = artist_urls[0]
+                        logger.info(f"✅ Found Spotify artist: {artist_url}")
                         
-                        if artist_url:
-                            # Create temporary profile with Spotify URL
-                            temp_profile = ArtistProfile(
-                                name=artist_name,
-                                spotify_url=f"https://open.spotify.com{artist_url}"
-                            )
-                            # Enrich with the found artist
-                            await self._enrich_spotify(temp_profile, enriched_data)
-                            
+                        # Create temporary profile with Spotify URL and enrich
+                        temp_profile = ArtistProfile(
+                            name=artist_name,
+                            spotify_url=artist_url
+                        )
+                        await self._enrich_spotify(temp_profile, enriched_data)
+                    else:
+                        logger.warning(f"⚠️ No Spotify artist found for: {artist_name}")
+                        
+                        # Fallback: Try direct search by creating a probable URL
+                        # Many artists have clean URLs based on their name
+                        clean_name = re.sub(r'[^\w\s-]', '', artist_name).strip().replace(' ', '')
+                        probable_urls = [
+                            f"https://open.spotify.com/artist/{clean_name}",
+                            f"https://open.spotify.com/artist/{clean_name.lower()}",
+                            f"https://open.spotify.com/artist/{artist_name.replace(' ', '').lower()}"
+                        ]
+                        
+                        # Try the most likely URL
+                        temp_profile = ArtistProfile(
+                            name=artist_name,
+                            spotify_url=probable_urls[0]
+                        )
+                        
+                        logger.info(f"🔍 Trying probable Spotify URL: {probable_urls[0]}")
+                        await self._enrich_spotify(temp_profile, enriched_data)
+                
+                else:
+                    logger.warning(f"⚠️ Spotify search page failed to load for: {artist_name}")
+                    
         except Exception as e:
-            logger.error(f"❌ Spotify search error: {str(e)}")
+            logger.error(f"❌ Spotify search error for {artist_name}: {str(e)}")
+            # Don't let Spotify errors break the entire enrichment
+            logger.info("⚠️ Continuing without Spotify data")
     
     async def _enrich_instagram(self, instagram_url: str, enriched_data: EnrichedArtistData):
         """Enrich with Instagram data using multiple extraction strategies"""
@@ -735,6 +790,8 @@ class Crawl4AIEnrichmentAgent:
             })
         
         return tracks
+    
+
     
     def _parse_number(self, text: str) -> int:
         """Parse numbers with K, M, B suffixes"""
