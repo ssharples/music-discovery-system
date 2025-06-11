@@ -804,121 +804,172 @@ class Crawl4AIYouTubeAgent:
     ) -> YouTubeSearchResult:
         """
         Single search with infinite scrolling until target number of videos found.
-        Much more efficient than multiple separate searches.
+        Uses a single browser session with aggressive JavaScript scrolling.
         """
         try:
             browser_config = await self.get_browser_config()
-            
-            # Enhanced crawler config for infinite scrolling
-            crawler_config = CrawlerRunConfig(
-                cache_mode=CacheMode.BYPASS,
-                wait_until="domcontentloaded",
-                page_timeout=60000,  # 60 second timeout for long scrolling session
-                delay_before_return_html=2.0,  # Initial delay
-                verbose=True,
-                simulate_user=True,
-                magic=True
-            )
-            
             search_url = self._build_search_url(query, upload_date)
+            
             logger.info(f"🔍 Starting infinite scroll search: {search_url}")
             logger.info(f"🎯 Target: {target_videos} videos")
             
+            # Single session with aggressive scrolling JavaScript
+            crawler_config = CrawlerRunConfig(
+                cache_mode=CacheMode.BYPASS,
+                wait_until="networkidle",
+                page_timeout=120000,  # 2 minute timeout for aggressive scrolling
+                delay_before_return_html=20.0,  # Wait 20 seconds for all scrolling to complete
+                verbose=True,
+                simulate_user=True,
+                magic=True,
+                js_code=f"""
+                (async function() {{
+                    console.log('Starting aggressive infinite scroll for YouTube...');
+                    
+                    const targetVideos = {target_videos};
+                    let scrollAttempts = 0;
+                    const maxScrollAttempts = 25;
+                    let noNewContentCount = 0;
+                    const maxNoNewContent = 5;
+                    
+                    function getVideoCount() {{
+                        const selectors = [
+                            'ytd-video-renderer',
+                            'ytd-rich-item-renderer', 
+                            'ytd-compact-video-renderer',
+                            '[data-testid*="video"]',
+                            'div[class*="ytd-video"]',
+                            'div[class*="video-renderer"]',
+                            'a[href*="/watch?v="]'
+                        ];
+                        
+                        let allVideos = new Set();
+                        selectors.forEach(selector => {{
+                            const elements = document.querySelectorAll(selector);
+                            elements.forEach(el => {{
+                                const link = el.querySelector('a[href*="/watch"]') || (el.href && el.href.includes('/watch') ? el : null);
+                                if (link) {{
+                                    const href = link.href || link.getAttribute('href');
+                                    if (href && href.includes('watch?v=')) {{
+                                        allVideos.add(href);
+                                    }}
+                                }}
+                            }});
+                        }});
+                        
+                        return allVideos.size;
+                    }}
+                    
+                    function performScroll() {{
+                        return new Promise(resolve => {{
+                            const startCount = getVideoCount();
+                            
+                            // Aggressive scroll techniques
+                            const viewportHeight = window.innerHeight;
+                            const currentScroll = window.pageYOffset;
+                            const scrollDistance = viewportHeight * 2;
+                            
+                            // Progressive scroll down
+                            window.scrollBy({{
+                                top: scrollDistance,
+                                behavior: 'smooth'
+                            }});
+                            
+                            // Trigger lazy loading by scrolling to bottom
+                            setTimeout(() => {{
+                                window.scrollTo({{
+                                    top: document.documentElement.scrollHeight,
+                                    behavior: 'smooth'
+                                }});
+                            }}, 1000);
+                            
+                            // Scroll back up slightly to trigger more loading
+                            setTimeout(() => {{
+                                window.scrollBy({{
+                                    top: -viewportHeight / 2,
+                                    behavior: 'smooth'
+                                }});
+                            }}, 2000);
+                            
+                            // Simulate user interactions
+                            setTimeout(() => {{
+                                // Hover over video elements to trigger metadata loading
+                                const videoElements = document.querySelectorAll('ytd-video-renderer, ytd-rich-item-renderer');
+                                videoElements.forEach((el, index) => {{
+                                    if (index < 10) {{
+                                        el.dispatchEvent(new MouseEvent('mouseover', {{ bubbles: true }}));
+                                    }}
+                                }});
+                                
+                                // Check if new content loaded
+                                const endCount = getVideoCount();
+                                const newVideos = endCount - startCount;
+                                
+                                console.log(`Scroll ${{scrollAttempts + 1}}: ${{startCount}} -> ${{endCount}} videos (+${{newVideos}})`);
+                                
+                                resolve({{
+                                    newVideos: newVideos,
+                                    totalVideos: endCount
+                                }});
+                            }}, 3000);
+                        }});
+                    }}
+                    
+                    // Main scrolling loop
+                    while (scrollAttempts < maxScrollAttempts) {{
+                        scrollAttempts++;
+                        console.log(`Starting scroll attempt ${{scrollAttempts}}/${{maxScrollAttempts}}`);
+                        
+                        const scrollResult = await performScroll();
+                        
+                        if (scrollResult.newVideos === 0) {{
+                            noNewContentCount++;
+                            console.log(`No new content found (attempt ${{noNewContentCount}}/${{maxNoNewContent}})`);
+                            
+                            if (noNewContentCount >= maxNoNewContent) {{
+                                console.log('Stopping - no new content after multiple attempts');
+                                break;
+                            }}
+                        }} else {{
+                            noNewContentCount = 0;
+                            console.log(`Found ${{scrollResult.newVideos}} new videos!`);
+                        }}
+                        
+                        if (scrollResult.totalVideos >= targetVideos) {{
+                            console.log(`Target reached! Found ${{scrollResult.totalVideos}} videos`);
+                            break;
+                        }}
+                        
+                        // Wait between scroll attempts
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    }}
+                    
+                    const finalCount = getVideoCount();
+                    console.log(`Infinite scroll complete! Found ${{finalCount}} total videos after ${{scrollAttempts}} attempts`);
+                    
+                    // Mark completion in page
+                    window.scrollingComplete = true;
+                    window.finalVideoCount = finalCount;
+                }})();
+                """
+            )
+            
             async with AsyncWebCrawler(config=browser_config) as crawler:
-                # Step 1: Load initial page
-                logger.info("📄 Loading initial search page...")
+                logger.info("🌐 Executing single-session infinite scroll...")
                 result = await crawler.arun(url=search_url, config=crawler_config)
                 
                 if not result.success:
-                    logger.error(f"❌ Initial page load failed: {result.error_message}")
+                    logger.error(f"❌ Infinite scroll failed: {result.error_message}")
                     return YouTubeSearchResult(
                         query=query, videos=[], total_results=0,
-                        success=False, error_message=f"Initial page load failed: {result.error_message}"
+                        success=False, error_message=f"Infinite scroll failed: {result.error_message}"
                     )
                 
-                # Step 2: Infinite scroll with video extraction and filtering
-                all_videos = []
-                scroll_attempts = 0
-                max_scroll_attempts = 50  # Prevent infinite loops
-                no_new_videos_count = 0
-                max_no_new_videos = 5  # Stop if no new videos found after 5 attempts
+                # Extract all videos from the final HTML
+                logger.info("🎬 Extracting videos from scrolled content...")
+                all_videos = await self._extract_videos_from_html(result.html, target_videos * 3)
                 
-                logger.info("🔄 Starting infinite scroll until target reached...")
-                
-                while len(all_videos) < target_videos and scroll_attempts < max_scroll_attempts:
-                    scroll_attempts += 1
-                    logger.info(f"📜 Scroll attempt {scroll_attempts}: Found {len(all_videos)}/{target_videos} videos")
-                    
-                    # Extract videos from current page state
-                    current_videos = await self._extract_videos_from_html(result.html, target_videos * 2)
-                    
-                    # Remove duplicates by video ID
-                    video_ids_seen = {v.video_id for v in all_videos}
-                    new_videos = [v for v in current_videos if v.video_id not in video_ids_seen]
-                    
-                    if new_videos:
-                        all_videos.extend(new_videos)
-                        no_new_videos_count = 0
-                        logger.info(f"✅ Found {len(new_videos)} new videos, total: {len(all_videos)}")
-                    else:
-                        no_new_videos_count += 1
-                        logger.warning(f"⚠️ No new videos found (attempt {no_new_videos_count}/{max_no_new_videos})")
-                        
-                        if no_new_videos_count >= max_no_new_videos:
-                            logger.warning("🛑 Stopping scroll - no new videos found after multiple attempts")
-                            break
-                    
-                    # If we've reached our target, stop scrolling
-                    if len(all_videos) >= target_videos:
-                        logger.info(f"🎉 Target reached! Found {len(all_videos)} videos")
-                        break
-                    
-                    # Scroll down to load more videos with intelligent JavaScript
-                    scroll_js = f"""
-                    (function() {{
-                        console.log('Infinite scroll attempt {scroll_attempts}...');
-                        
-                        // Multiple scroll strategies for better video loading
-                        let scrollDistance = window.innerHeight * 2;  // Scroll 2 viewport heights
-                        let currentPosition = window.pageYOffset;
-                        
-                        // Smooth scroll down
-                        window.scrollTo({{
-                            top: currentPosition + scrollDistance,
-                            behavior: 'smooth'
-                        }});
-                        
-                        // Wait for content to load, then scroll a bit more
-                        setTimeout(() => {{
-                            window.scrollBy(0, 500);
-                            console.log('Additional scroll applied');
-                        }}, 1500);
-                        
-                        // Simulate user behavior - random small movements
-                        setTimeout(() => {{
-                            window.scrollBy(0, Math.random() * 200 - 100);
-                        }}, 2000);
-                        
-                        console.log('Scroll completed, waiting for new content...');
-                    }})();
-                    """
-                    
-                    # Execute scroll and wait for new content
-                    crawler_config.js_code = scroll_js
-                    crawler_config.delay_before_return_html = 4.0  # Wait for content to load
-                    
-                    # Re-crawl the page to get new content
-                    logger.info("🌐 Scrolling and waiting for new content...")
-                    result = await crawler.arun(url=search_url, config=crawler_config)
-                    
-                    if not result.success:
-                        logger.warning(f"⚠️ Scroll attempt {scroll_attempts} failed, continuing...")
-                        continue
-                    
-                    # Brief delay between scroll attempts
-                    await asyncio.sleep(1.0)
-                
-                # Limit to target number and remove duplicates
+                # Remove duplicates
                 unique_videos = []
                 seen_ids = set()
                 for video in all_videos:

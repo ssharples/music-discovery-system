@@ -396,14 +396,14 @@ class MasterDiscoveryAgent:
         """
         try:
             # First try exact match
-            exact_response = deps.supabase.table("artists").select("id").eq("name", artist_name).execute()
+            exact_response = deps.supabase.table("artist").select("id").eq("name", artist_name).execute()
             if len(exact_response.data) > 0:
                 logger.debug(f"Found exact match for artist: {artist_name}")
                 return True
             
             # Then try fuzzy match with cleaned names
             cleaned_name = self._clean_artist_name(artist_name).lower()
-            fuzzy_response = deps.supabase.table("artists").select("id", "name").execute()
+            fuzzy_response = deps.supabase.table("artist").select("id", "name").execute()
             
             for existing_artist in fuzzy_response.data:
                 existing_cleaned = self._clean_artist_name(existing_artist['name']).lower()
@@ -426,7 +426,7 @@ class MasterDiscoveryAgent:
             if not video_id:
                 return False
                 
-            response = deps.supabase.table("artists").select("id").eq("discovery_video_id", video_id).execute()
+            response = deps.supabase.table("artist").select("id").eq("discovery_video_id", video_id).execute()
             return len(response.data) > 0
             
         except Exception as e:

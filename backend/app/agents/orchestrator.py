@@ -304,7 +304,8 @@ class DiscoveryOrchestrator:
                     
                     # Notify progress
                     for i, artist in enumerate(discovered_artists, 1):
-                        await notify_artist_discovered(str(session_id), {
+                        await notify_artist_discovered({
+                            "session_id": str(session_id),
                             "artist": artist,
                             "progress": i,
                             "total": total_found
