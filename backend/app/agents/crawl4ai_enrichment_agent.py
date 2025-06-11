@@ -183,15 +183,13 @@ class Crawl4AIEnrichmentAgent:
                         enriched_data.profile.follower_counts['spotify_monthly_listeners'] = monthly_listeners
                         logger.info(f"✅ Found {monthly_listeners:,} monthly listeners")
                     
-                    # 2. Extract artist bio/biography
+                    # 2. Extract artist bio/biography with improved filtering
                     bio_patterns = [
                         r'<div[^>]*data-testid[^>]*biography[^>]*>([^<]+)',
                         r'<div[^>]*about[^>]*>([^<]+)',
                         r'"biography":\s*"([^"]+)"',
-                        r'artist[_-]?bio[^>]*>([^<]+)',
-                        r'description[^>]*>([^<]+)',
                         r'"about":\s*"([^"]+)"',
-                        r'<p[^>]*class="[^"]*bio[^"]*"[^>]*>([^<]+)',
+                        r'<section[^>]*>\s*<div[^>]*>\s*<p[^>]*>([^<]+)</p>',
                     ]
                     
                     for pattern in bio_patterns:
@@ -199,9 +197,14 @@ class Crawl4AIEnrichmentAgent:
                         if matches:
                             for match in matches:
                                 clean_bio = re.sub(r'<[^>]+>', '', match).strip()
-                                if len(clean_bio) > 20:  # Reasonable bio length
+                                # Filter out CSS, JavaScript, or HTML-like content
+                                if (len(clean_bio) > 20 and 
+                                    not re.search(r'\{[^}]*\}|#[a-f0-9]{3,6}|margin|padding|width|height|color:', clean_bio, re.IGNORECASE) and
+                                    not clean_bio.startswith(('section{', 'div{', '.', '#')) and
+                                    'cookie' not in clean_bio.lower() and
+                                    'policy' not in clean_bio.lower()):
                                     enriched_data.profile.bio = clean_bio[:500]
-                                    logger.info("✅ Found artist bio")
+                                    logger.info(f"✅ Found clean artist bio: {clean_bio[:50]}...")
                                     break
                             if enriched_data.profile.bio:
                                 break
@@ -243,28 +246,28 @@ class Crawl4AIEnrichmentAgent:
                                     logger.info(f"✅ Found genres: {', '.join(genre_list[:3])}")
                                     break
                     
-                    # 5. Extract social media links from Spotify page
+                    # 5. Extract social media links from Spotify page with better filtering
                     social_link_patterns = {
-                        'instagram': r'href="(https?://(?:www\.)?instagram\.com/[^"]+)"',
-                        'twitter': r'href="(https?://(?:www\.)?(?:twitter|x)\.com/[^"]+)"',
-                        'facebook': r'href="(https?://(?:www\.)?facebook\.com/[^"]+)"',
-                        'youtube': r'href="(https?://(?:www\.)?youtube\.com/[^"]+)"',
-                        'website': r'href="(https?://[^"]+\.[^"]+)"',  # General website links
+                        'instagram': r'href="(https?://(?:www\.)?instagram\.com/[^"/?]+)/?"',
+                        'twitter': r'href="(https?://(?:www\.)?(?:twitter|x)\.com/[^"/?]+)/?"',
+                        'facebook': r'href="(https?://(?:www\.)?facebook\.com/[^"/?]+)/?"',
+                        'youtube': r'href="(https?://(?:www\.)?youtube\.com/(?:c/|user/|@)[^"/?]+)/?"',
                     }
                     
                     for platform, pattern in social_link_patterns.items():
                         matches = re.findall(pattern, result.html, re.IGNORECASE)
                         if matches:
-                            # Filter out obvious non-social links for website
-                            if platform == 'website':
-                                for link in matches:
-                                    if not any(x in link.lower() for x in ['spotify.com', 'instagram.com', 'twitter.com', 'facebook.com', 'youtube.com']):
-                                        enriched_data.profile.social_links[platform] = link
-                                        logger.info(f"✅ Found {platform}: {link}")
-                                        break
-                            else:
-                                enriched_data.profile.social_links[platform] = matches[0]
-                                logger.info(f"✅ Found {platform}: {matches[0]}")
+                            # Filter out generic Spotify links and ensure artist-specific links
+                            valid_links = []
+                            for link in matches:
+                                # Exclude generic platform links and ensure artist-specific profiles
+                                if (not any(generic in link.lower() for generic in ['/spotify', '/login', '/signup', '/home', '/browse']) and
+                                    len(link.split('/')[-1]) > 2):  # Ensure username/handle exists
+                                    valid_links.append(link)
+                            
+                            if valid_links:
+                                enriched_data.profile.social_links[platform] = valid_links[0]
+                                logger.info(f"✅ Found {platform}: {valid_links[0]}")
                     
                     # 6. Extract top tracks using enhanced patterns
                     tracks = self._extract_spotify_tracks(result.html)
@@ -288,7 +291,10 @@ class Crawl4AIEnrichmentAgent:
     async def _search_and_enrich_spotify(self, artist_name: str, enriched_data: EnrichedArtistData):
         """Search for artist on Spotify and enrich with robust fallback approach"""
         try:
-            search_url = f"https://open.spotify.com/search/{artist_name.replace(' ', '%20')}/artists"
+            # Handle character encoding for non-ASCII artist names
+            import urllib.parse
+            encoded_name = urllib.parse.quote(artist_name.encode('utf-8'), safe='')
+            search_url = f"https://open.spotify.com/search/{encoded_name}/artists"
             logger.info(f"🔍 Searching Spotify for: {artist_name}")
             
             # Flexible crawler config that doesn't depend on specific selectors
@@ -429,7 +435,9 @@ class Crawl4AIEnrichmentAgent:
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
                 extraction_strategy=extraction_strategy,
-                wait_for="css:header, css:main, css:h1, css:[data-testid='user-title']",
+                wait_until="domcontentloaded",
+                page_timeout=30000,
+                delay_before_return_html=4.0,
                 js_code="""
                 // Wait for page load and scroll slightly to trigger content
                 await new Promise(resolve => setTimeout(resolve, 3000));
@@ -543,7 +551,9 @@ class Crawl4AIEnrichmentAgent:
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
                 extraction_strategy=extraction_strategy,
-                wait_for="css:h1, css:h2, css:[data-e2e='user-title'], css:.user-title, css:.share-title-container",
+                wait_until="domcontentloaded",
+                page_timeout=30000,
+                delay_before_return_html=4.0,
                 js_code="""
                 // Wait for page load and try to trigger any lazy loading
                 await new Promise(resolve => setTimeout(resolve, 4000));
@@ -770,7 +780,9 @@ class Crawl4AIEnrichmentAgent:
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
                 extraction_strategy=extraction_strategy,
-                wait_for="css:.lyrics__content, css:.mxm-lyrics, css:[data-testid='lyrics-line'], css:.lyrics-line-text",
+                wait_until="domcontentloaded",
+                page_timeout=20000,
+                delay_before_return_html=3.0,
                 js_code="""
                 // Wait for lyrics to load and handle any overlays
                 await new Promise(resolve => setTimeout(resolve, 3000));
@@ -823,7 +835,9 @@ class Crawl4AIEnrichmentAgent:
             
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
-                wait_for="css:[data-lyrics-container], css:.lyrics",
+                wait_until="domcontentloaded",
+                page_timeout=15000,
+                delay_before_return_html=2.0,
                 js_code="""
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 """
