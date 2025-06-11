@@ -10,10 +10,22 @@ from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
-from crawl4ai.extraction_strategy import JsonCssExtractionStrategy, LLMExtractionStrategy
-from crawl4ai.content_filter import LLMContentFilter
-from crawl4ai.llm_config import LLMConfig
-from crawl4ai.markdown_generator import DefaultMarkdownGenerator
+from crawl4ai.extraction_strategy import JsonCssExtractionStrategy
+
+# Optional imports for LLM features (may not be available in all Crawl4AI versions)
+try:
+    from crawl4ai.extraction_strategy import LLMExtractionStrategy
+    from crawl4ai.content_filter import LLMContentFilter
+    from crawl4ai.llm_config import LLMConfig
+    from crawl4ai.markdown_generator import DefaultMarkdownGenerator
+    LLM_FEATURES_AVAILABLE = True
+except ImportError:
+    # Fallback for older Crawl4AI versions
+    LLMExtractionStrategy = None
+    LLMContentFilter = None
+    LLMConfig = None
+    DefaultMarkdownGenerator = None
+    LLM_FEATURES_AVAILABLE = False
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.deepseek import DeepSeekProvider
@@ -54,14 +66,17 @@ class Crawl4AIEnrichmentAgent:
             ]
         )
         
-        # LLM configuration for content filtering
-        self.llm_config = LLMConfig(
-            provider="deepseek",
-            model="deepseek-chat",
-            api_key=settings.DEEPSEEK_API_KEY,
-            temperature=0.3,
-            max_tokens=1000
-        )
+        # LLM configuration for content filtering (if available)
+        if LLM_FEATURES_AVAILABLE:
+            self.llm_config = LLMConfig(
+                provider="deepseek",
+                model="deepseek-chat",
+                api_key=settings.DEEPSEEK_API_KEY,
+                temperature=0.3,
+                max_tokens=1000
+            )
+        else:
+            self.llm_config = None
         
         # AI data cleaner for all extracted data
         self.ai_cleaner = get_ai_cleaner()
@@ -76,10 +91,16 @@ class Crawl4AIEnrichmentAgent:
             Return a concise analysis focused on artistic themes."""
         )
         
-        logger.info("✅ Enhanced Crawl4AI Enrichment Agent initialized with LLM content filtering")
+        if LLM_FEATURES_AVAILABLE:
+            logger.info("✅ Enhanced Crawl4AI Enrichment Agent initialized with LLM content filtering")
+        else:
+            logger.info("✅ Crawl4AI Enrichment Agent initialized (LLM features not available in this version)")
     
-    async def create_spotify_content_filter(self) -> LLMContentFilter:
+    async def create_spotify_content_filter(self):
         """Create LLM-based content filter for Spotify pages"""
+        if not LLM_FEATURES_AVAILABLE or not self.llm_config:
+            return None
+        
         return LLMContentFilter(
             llm_config=self.llm_config,
             instruction="""
@@ -103,8 +124,11 @@ class Crawl4AIEnrichmentAgent:
             verbose=True
         )
     
-    async def create_instagram_content_filter(self) -> LLMContentFilter:
+    async def create_instagram_content_filter(self):
         """Create LLM-based content filter for Instagram pages"""
+        if not LLM_FEATURES_AVAILABLE or not self.llm_config:
+            return None
+            
         return LLMContentFilter(
             llm_config=self.llm_config,
             instruction="""
@@ -128,8 +152,11 @@ class Crawl4AIEnrichmentAgent:
             verbose=True
         )
     
-    async def create_tiktok_content_filter(self) -> LLMContentFilter:
+    async def create_tiktok_content_filter(self):
         """Create LLM-based content filter for TikTok pages"""
+        if not LLM_FEATURES_AVAILABLE or not self.llm_config:
+            return None
+            
         return LLMContentFilter(
             llm_config=self.llm_config,
             instruction="""
@@ -153,8 +180,11 @@ class Crawl4AIEnrichmentAgent:
             verbose=True
         )
     
-    async def create_lyrics_content_filter(self) -> LLMContentFilter:
+    async def create_lyrics_content_filter(self):
         """Create LLM-based content filter for lyrics pages"""
+        if not LLM_FEATURES_AVAILABLE or not self.llm_config:
+            return None
+            
         return LLMContentFilter(
             llm_config=self.llm_config,
             instruction="""
@@ -266,19 +296,20 @@ class Crawl4AIEnrichmentAgent:
                 
             logger.info(f"🎵 Crawling Spotify with LLM filtering: {spotify_url}")
             
-            # Create LLM content filter for Spotify
+            # Create LLM content filter for Spotify (if available)
             content_filter = await self.create_spotify_content_filter()
             
-            # Create markdown generator with LLM filter
-            markdown_generator = DefaultMarkdownGenerator(
-                content_filter=content_filter,
-                options={"ignore_links": False}
-            )
+            # Create markdown generator with LLM filter (if available)
+            markdown_generator = None
+            if content_filter and DefaultMarkdownGenerator:
+                markdown_generator = DefaultMarkdownGenerator(
+                    content_filter=content_filter,
+                    options={"ignore_links": False}
+                )
             
-            # Enhanced crawler config with LLM filtering
+            # Enhanced crawler config with optional LLM filtering
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
-                markdown_generator=markdown_generator,
                 wait_until="domcontentloaded",
                 page_timeout=20000,  # Increased timeout for LLM processing
                 delay_before_return_html=5.0,  # More time for content filtering
@@ -293,6 +324,10 @@ class Crawl4AIEnrichmentAgent:
                 simulate_user=True,
                 verbose=True
             )
+            
+            # Add markdown generator if available
+            if markdown_generator:
+                crawler_config.markdown_generator = markdown_generator
             
             async with AsyncWebCrawler(config=self.browser_config) as crawler:
                 result = await crawler.arun(
@@ -550,14 +585,16 @@ class Crawl4AIEnrichmentAgent:
         try:
             logger.info(f"📸 Crawling Instagram with LLM filtering: {instagram_url}")
             
-            # Create LLM content filter for Instagram
+            # Create LLM content filter for Instagram (if available)
             content_filter = await self.create_instagram_content_filter()
             
-            # Create markdown generator with LLM filter
-            markdown_generator = DefaultMarkdownGenerator(
-                content_filter=content_filter,
-                options={"ignore_links": False}
-            )
+            # Create markdown generator with LLM filter (if available)
+            markdown_generator = None
+            if content_filter and DefaultMarkdownGenerator:
+                markdown_generator = DefaultMarkdownGenerator(
+                    content_filter=content_filter,
+                    options={"ignore_links": False}
+                )
             
             # Enhanced schema for Instagram data extraction with current selectors
             schema = {
@@ -596,7 +633,6 @@ class Crawl4AIEnrichmentAgent:
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
                 extraction_strategy=extraction_strategy,
-                markdown_generator=markdown_generator,
                 wait_until="domcontentloaded",
                 page_timeout=30000,
                 delay_before_return_html=5.0,  # More time for LLM filtering
@@ -609,6 +645,10 @@ class Crawl4AIEnrichmentAgent:
                 magic=True,  # Enable anti-bot features
                 simulate_user=True
             )
+            
+            # Add markdown generator if available
+            if markdown_generator:
+                crawler_config.markdown_generator = markdown_generator
             
             async with AsyncWebCrawler(config=self.browser_config) as crawler:
                 result = await crawler.arun(
@@ -690,14 +730,16 @@ class Crawl4AIEnrichmentAgent:
         try:
             logger.info(f"🎭 Crawling TikTok with LLM filtering: {tiktok_url}")
             
-            # Create LLM content filter for TikTok
+            # Create LLM content filter for TikTok (if available)
             content_filter = await self.create_tiktok_content_filter()
             
-            # Create markdown generator with LLM filter
-            markdown_generator = DefaultMarkdownGenerator(
-                content_filter=content_filter,
-                options={"ignore_links": False}
-            )
+            # Create markdown generator with LLM filter (if available)
+            markdown_generator = None
+            if content_filter and DefaultMarkdownGenerator:
+                markdown_generator = DefaultMarkdownGenerator(
+                    content_filter=content_filter,
+                    options={"ignore_links": False}
+                )
             
             # Enhanced schema for TikTok data extraction with current selectors
             schema = {
@@ -741,7 +783,6 @@ class Crawl4AIEnrichmentAgent:
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
                 extraction_strategy=extraction_strategy,
-                markdown_generator=markdown_generator,
                 wait_until="domcontentloaded",
                 page_timeout=30000,
                 delay_before_return_html=5.0,  # More time for LLM filtering
@@ -754,6 +795,10 @@ class Crawl4AIEnrichmentAgent:
                 magic=True,  # Enable anti-bot features
                 simulate_user=True
             )
+            
+            # Add markdown generator if available
+            if markdown_generator:
+                crawler_config.markdown_generator = markdown_generator
             
             async with AsyncWebCrawler(config=self.browser_config) as crawler:
                 result = await crawler.arun(
@@ -946,14 +991,16 @@ class Crawl4AIEnrichmentAgent:
         try:
             musixmatch_url = f"https://www.musixmatch.com/lyrics/{clean_artist}/{clean_track}"
             
-            # Create LLM content filter for lyrics
+            # Create LLM content filter for lyrics (if available)
             content_filter = await self.create_lyrics_content_filter()
             
-            # Create markdown generator with LLM filter
-            markdown_generator = DefaultMarkdownGenerator(
-                content_filter=content_filter,
-                options={"ignore_links": False}
-            )
+            # Create markdown generator with LLM filter (if available)
+            markdown_generator = None
+            if content_filter and DefaultMarkdownGenerator:
+                markdown_generator = DefaultMarkdownGenerator(
+                    content_filter=content_filter,
+                    options={"ignore_links": False}
+                )
             
             # Enhanced schema for Musixmatch lyrics extraction with current selectors
             schema = {
@@ -982,7 +1029,6 @@ class Crawl4AIEnrichmentAgent:
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
                 extraction_strategy=extraction_strategy,
-                markdown_generator=markdown_generator,
                 wait_until="domcontentloaded",
                 page_timeout=25000,  # Increased timeout for LLM processing
                 delay_before_return_html=4.0,  # More time for content filtering
@@ -999,6 +1045,10 @@ class Crawl4AIEnrichmentAgent:
                 magic=True,  # Enable anti-bot features
                 simulate_user=True
             )
+            
+            # Add markdown generator if available
+            if markdown_generator:
+                crawler_config.markdown_generator = markdown_generator
             
             async with AsyncWebCrawler(config=self.browser_config) as crawler:
                 result = await crawler.arun(
