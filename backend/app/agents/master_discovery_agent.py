@@ -34,6 +34,9 @@ from app.core.config import settings
 # AI imports for DeepSeek-powered data cleaning
 from app.agents.ai_data_cleaner import get_ai_cleaner, AIDataCleaner
 
+# Enhanced logging
+from app.core.logging_config import get_progress_logger
+
 logger = logging.getLogger(__name__)
 
 class MasterDiscoveryAgent:
@@ -81,7 +84,12 @@ class MasterDiscoveryAgent:
         try:
             # Phase 1: YouTube Video Discovery with Infinite Scroll
             logger.info("📺 Phase 1: YouTube video discovery with infinite scroll")
+            phase1_start = time.time()
+            
             processed_videos = await self._search_and_filter_videos_with_infinite_scroll(deps, search_query)
+            
+            phase1_time = time.time() - phase1_start
+            logger.info(f"✅ Phase 1 complete in {phase1_time:.1f}s", extra={'operation_time': phase1_time})
             
             if not processed_videos:
                 return self._create_empty_result("No videos found that passed filtering", start_time)
@@ -90,32 +98,43 @@ class MasterDiscoveryAgent:
             
             # Phase 2: Artist Processing Pipeline
             logger.info("🎤 Phase 2: Artist processing pipeline")
+            phase2_start = time.time()
+            
             discovered_artists = []
             total_processed = 0
             
+            # Create progress logger for artist processing
+            progress_logger = get_progress_logger('app.agents.master_discovery_agent', min(len(processed_videos), max_results))
+            
             for i, video_data in enumerate(processed_videos[:max_results], 1):
                 try:
-                    logger.info(f"Processing artist {i}/{min(len(processed_videos), max_results)}")
+                    artist_start = time.time()
+                    progress_logger.step(f"Processing artist {i}: {video_data.get('extracted_artist_name', 'Unknown')}")
                     
                     artist_result = await self._process_single_artist(deps, video_data)
                     
+                    artist_time = time.time() - artist_start
+                    
                     if artist_result and artist_result.get('success'):
                         discovered_artists.append(artist_result)
-                        logger.info(f"✅ Artist {i} processed successfully: {artist_result.get('name')}")
+                        progress_logger.step(f"✅ Artist {i} processed successfully: {artist_result.get('name')} ⏱️ {artist_time:.1f}s")
                     else:
-                        logger.info(f"⚠️ Artist {i} processing failed or filtered out")
+                        progress_logger.error(f"⚠️ Artist {i} processing failed or filtered out ⏱️ {artist_time:.1f}s")
                     
                     total_processed += 1
                     
                     # Rate limiting
-                    await asyncio.sleep(1.0)
+                    await asyncio.sleep(0.5)  # Reduced from 1.0s
                     
                 except Exception as e:
-                    logger.error(f"❌ Error processing artist {i}: {e}")
+                    progress_logger.error(f"❌ Error processing artist {i}: {e}")
                     continue
             
             # Phase 3: Final Results
+            phase2_time = time.time() - phase2_start
             execution_time = time.time() - start_time
+            
+            logger.info(f"✅ Phase 2 complete in {phase2_time:.1f}s", extra={'operation_time': phase2_time})
             logger.info(f"🎉 Discovery complete! Found {len(discovered_artists)} artists in {execution_time:.2f}s")
             
             return {
@@ -126,6 +145,10 @@ class MasterDiscoveryAgent:
                     'total_processed': total_processed,
                     'total_found': len(discovered_artists),
                     'execution_time': execution_time,
+                    'phase_times': {
+                        'phase1_filtering': phase1_time,
+                        'phase2_processing': phase2_time
+                    },
                     'discovery_metadata': {
                         'videos_after_filtering': len(processed_videos),
                         'success_rate': len(discovered_artists) / total_processed if total_processed > 0 else 0,
@@ -166,113 +189,129 @@ class MasterDiscoveryAgent:
         Returns:
             List of processed videos that passed all filters
         """
+        filter_start_time = time.time()
         logger.info(f"🔄 Starting infinite scroll search - target: {target_filtered_videos} filtered videos")
         
-        # Statistics tracking for the new fallback mechanism
-        stats = {
-            'total_videos': 0,
-            'passed_title_filter': 0,
-            'passed_artist_extraction': 0,
-            'passed_database_checks': 0,
-            'passed_content_validation': 0,
-            'found_social_in_description': 0,
-            'found_social_via_channel_fallback': 0,
-            'failed_social_requirement': 0,
-            'final_success': 0
-        }
-        
         try:
-            # Single search with infinite scrolling to get raw videos
+            # YouTube infinite scroll search
             logger.info(f"🔍 Performing infinite scroll search for: '{search_query}'")
+            scroll_start = time.time()
             
-            result = await asyncio.wait_for(
-                self.youtube_agent.search_videos_with_infinite_scroll(
-                    query=search_query,
-                    target_videos=target_filtered_videos * 3,  # Get 3x more to account for filtering
-                    upload_date="day"  # Today's uploads only
-                ),
-                timeout=300.0  # 5 minute timeout for the entire scroll session
-            )
+            videos = await self.youtube_agent.search_with_infinite_scroll(search_query)
             
-            if not result.success or not result.videos:
-                logger.error(f"❌ Infinite scroll search failed: {result.error_message}")
+            scroll_time = time.time() - scroll_start
+            logger.info(f"✅ Infinite scroll found {len(videos)} raw videos ⏱️ {scroll_time:.1f}s")
+            
+            if not videos:
+                logger.warning("❌ No videos found from YouTube search")
                 return []
             
-            logger.info(f"✅ Infinite scroll found {len(result.videos)} raw videos")
-            stats['total_videos'] = len(result.videos)
+            # Initialize filtering statistics
+            stats = {
+                'total_videos': len(videos),
+                'passed_title_filter': 0,
+                'passed_artist_extraction': 0,
+                'passed_database_checks': 0,
+                'passed_content_validation': 0,
+                'found_social_in_description': 0,
+                'found_social_via_channel_fallback': 0,
+                'failed_social_requirement': 0,
+                'final_success': 0
+            }
             
-            # Convert videos to the expected format
-            youtube_videos = []
-            for video in result.videos:
-                youtube_videos.append({
-                    'title': video.title,
-                    'url': video.url,
-                    'channel_name': video.channel_name,
-                    'channel_title': video.channel_name,  # Alias for consistency
-                    'view_count': video.view_count,
-                    'duration': video.duration,
-                    'upload_date': video.upload_date,
-                    'video_id': self._extract_video_id(video.url),
-                    'channel_id': self._extract_channel_id(video.url),
-                    'channel_url': f"https://www.youtube.com/channel/{self._extract_channel_id(video.url)}" if self._extract_channel_id(video.url) else None,
-                    'description': ''  # Description not available from search
-                })
+            logger.info(f"🔍 Processing and filtering {len(videos)} videos...")
+            filter_process_start = time.time()
             
-            logger.info(f"🔍 Processing and filtering {len(youtube_videos)} videos...")
-            
-            # Filter videos through our criteria
             processed_videos = []
-            for video in youtube_videos:
+            
+            # Create progress logger for filtering
+            progress_logger = get_progress_logger('app.agents.master_discovery_agent.filtering', len(videos))
+            
+            for i, video in enumerate(videos, 1):
+                video_start_time = time.time()
+                video_title = video.get('title', 'Unknown')
+                video_id = video.get('video_id', 'Unknown')
+                
                 try:
-                    video_title = video.get('title', '')
+                    progress_logger.debug(f"🔍 Processing video {i}: '{video_title[:50]}...'")
                     
-                    # Step 1: Validate title contains "official music video" (case insensitive)
+                    # Step 1: Title validation
+                    step_start = time.time()
                     if not self._validate_title_contains_search_terms(video_title):
+                        step_time = time.time() - step_start
+                        progress_logger.debug(f"❌ Video {i} failed title filter ⏱️ {step_time:.3f}s")
                         continue
+                    
                     stats['passed_title_filter'] += 1
+                    step_time = time.time() - step_start
+                    progress_logger.debug(f"✅ Video {i} passed title filter ⏱️ {step_time:.3f}s")
                     
-                    # Step 2: Extract and clean artist name using AI
+                    # Step 2: Artist name extraction and cleaning
+                    step_start = time.time()
                     artist_name = await self._extract_and_clean_artist_name(video_title)
+                    
                     if not artist_name:
+                        step_time = time.time() - step_start
+                        progress_logger.debug(f"❌ Video {i} failed artist extraction ⏱️ {step_time:.3f}s")
                         continue
+                        
                     stats['passed_artist_extraction'] += 1
+                    step_time = time.time() - step_start
+                    progress_logger.debug(f"✅ Video {i} extracted artist: '{artist_name}' ⏱️ {step_time:.3f}s")
                     
-                    # Step 3: Check if this specific video has already been processed
-                    if await self._video_exists_in_database(deps, video.get('url', '')):
-                        continue
-                    
-                    # Step 4: Check if artist already exists in database
+                    # Step 3: Database duplicate checks
+                    step_start = time.time()
                     if await self._artist_exists_in_database(deps, artist_name):
+                        step_time = time.time() - step_start
+                        progress_logger.debug(f"⏭️ Video {i} skipped - artist '{artist_name}' already exists ⏱️ {step_time:.3f}s")
                         continue
+                    
+                    if await self._video_exists_in_database(deps, video.get('url', '')):
+                        step_time = time.time() - step_start
+                        progress_logger.debug(f"⏭️ Video {i} skipped - video already processed ⏱️ {step_time:.3f}s")
+                        continue
+                        
                     stats['passed_database_checks'] += 1
+                    step_time = time.time() - step_start
+                    progress_logger.debug(f"✅ Video {i} passed database checks ⏱️ {step_time:.3f}s")
                     
-                    # Step 5: Validate content (check for AI/cover keywords)
-                    if not self._validate_content(video_title, video.get('description', '')):
+                    # Step 4: Content validation
+                    step_start = time.time()
+                    description = video.get('description', '')
+                    if not self._validate_content(video_title, description):
+                        step_time = time.time() - step_start
+                        progress_logger.debug(f"❌ Video {i} failed content validation ⏱️ {step_time:.3f}s")
                         continue
+                        
                     stats['passed_content_validation'] += 1
+                    step_time = time.time() - step_start
+                    progress_logger.debug(f"✅ Video {i} passed content validation ⏱️ {step_time:.3f}s")
                     
-                    # Step 6: Extract and clean social media links from description
-                    raw_social_links = self._extract_social_links_from_description(video.get('description', ''))
-                    social_links = await self._clean_social_links(raw_social_links)
+                    # Step 5: Social media link extraction (CRITICAL BOTTLENECK)
+                    step_start = time.time()
+                    progress_logger.debug(f"🔍 Video {i} extracting social links from description...")
                     
-                    # Step 7: ENHANCED SOCIAL MEDIA DISCOVERY - Try channel fallback if description lacks links
+                    raw_social_links = self._extract_social_links_from_description(description)
+                    social_links = await self._clean_social_links(raw_social_links) if raw_social_links else None
+                    social_source = "description"
+                    
+                    # Check if we have required social platforms
                     has_required_social = False
-                    social_source = "none"
-                    
                     if social_links:
                         has_required_social = any(getattr(social_links, platform, None) for platform in ['spotify', 'instagram', 'tiktok'])
                         if has_required_social:
-                            social_source = "description"
                             stats['found_social_in_description'] += 1
+                            social_extraction_time = time.time() - step_start
+                            progress_logger.debug(f"✅ Video {i} found social links in description: {[p for p in ['spotify', 'instagram', 'tiktok'] if getattr(social_links, p, None)]} ⏱️ {social_extraction_time:.3f}s")
                     
                     if not has_required_social:
-                        logger.info(f"🔍 No social links in description for {artist_name} - trying channel fallback")
+                        progress_logger.debug(f"🔍 Video {i} no social links in description - trying channel fallback...")
                         
                         # Fallback: Try to extract social links from YouTube channel About page
                         try:
                             channel_social_links = await self._extract_social_from_channel(video.get('channel_url'))
                             if channel_social_links:
-                                logger.info(f"✅ Found social links from channel: {list(channel_social_links.keys())}")
+                                progress_logger.debug(f"✅ Video {i} found social links from channel: {list(channel_social_links.keys())}")
                                 
                                 # Merge channel links with description links
                                 if not social_links:
@@ -289,13 +328,16 @@ class MasterDiscoveryAgent:
                                     social_source = "channel_fallback"
                                     stats['found_social_via_channel_fallback'] += 1
                         except Exception as e:
-                            logger.warning(f"⚠️ Channel social link extraction failed for {artist_name}: {e}")
+                            progress_logger.debug(f"⚠️ Video {i} channel social link extraction failed: {e}")
                     
                     # Final check: Must have at least one of the required social platforms
                     if not has_required_social:
-                        logger.debug(f"⏭️ Skipping {artist_name} - no Spotify/Instagram/TikTok links found in description OR channel")
+                        step_time = time.time() - step_start
+                        progress_logger.debug(f"❌ Video {i} failed social requirement - no Spotify/Instagram/TikTok links ⏱️ {step_time:.3f}s")
                         stats['failed_social_requirement'] += 1
                         continue
+                    
+                    step_time = time.time() - step_start
                     
                     cleaned_links_dict = {
                         k: v for k, v in {
@@ -309,7 +351,8 @@ class MasterDiscoveryAgent:
                         }.items() if v
                     }
                     
-                    logger.info(f"✅ Artist {artist_name} has social links ({social_source}): {list(cleaned_links_dict.keys())}")
+                    video_total_time = time.time() - video_start_time
+                    progress_logger.step(f"✅ Video {i} PASSED ALL FILTERS: '{artist_name}' has social links ({social_source}): {list(cleaned_links_dict.keys())} ⏱️ Total: {video_total_time:.3f}s")
                     
                     # Add processed data to video
                     video['extracted_artist_name'] = artist_name
@@ -318,28 +361,32 @@ class MasterDiscoveryAgent:
                     
                     processed_videos.append(video)
                     stats['final_success'] += 1
-                    logger.debug(f"✅ Video passed all filters: {artist_name} - {video_title}")
                     
                     # Stop if we've reached our target
                     if len(processed_videos) >= target_filtered_videos:
-                        logger.info(f"🎯 Reached target! {len(processed_videos)} videos passed all filters")
+                        progress_logger.step(f"🎯 Reached target! {len(processed_videos)} videos passed all filters")
                         break
                     
                 except Exception as e:
-                    logger.error(f"Error processing video: {e}")
+                    video_time = time.time() - video_start_time
+                    progress_logger.error(f"❌ Video {i} processing error: {e} ⏱️ {video_time:.3f}s")
                     continue
             
-            # Log filtering statistics
-            logger.info(f"📊 FILTERING STATISTICS:")
-            logger.info(f"   Total videos scraped: {stats['total_videos']}")
-            logger.info(f"   Passed title filter: {stats['passed_title_filter']} ({stats['passed_title_filter']/stats['total_videos']*100:.1f}%)")
-            logger.info(f"   Passed artist extraction: {stats['passed_artist_extraction']} ({stats['passed_artist_extraction']/stats['total_videos']*100:.1f}%)")
-            logger.info(f"   Passed database checks: {stats['passed_database_checks']} ({stats['passed_database_checks']/stats['total_videos']*100:.1f}%)")
-            logger.info(f"   Passed content validation: {stats['passed_content_validation']} ({stats['passed_content_validation']/stats['total_videos']*100:.1f}%)")
-            logger.info(f"   Found social in description: {stats['found_social_in_description']}")
-            logger.info(f"   Found social via channel fallback: {stats['found_social_via_channel_fallback']}")
-            logger.info(f"   Failed social requirement: {stats['failed_social_requirement']}")
-            logger.info(f"   FINAL SUCCESS: {stats['final_success']} ({stats['final_success']/stats['total_videos']*100:.1f}%)")
+            # Log comprehensive filtering statistics
+            filter_process_time = time.time() - filter_process_start
+            total_time = time.time() - filter_start_time
+            
+            logger.info(f"📊 FILTERING STATISTICS SUMMARY:")
+            logger.info(f"   🎬 Total videos scraped: {stats['total_videos']}")
+            logger.info(f"   📝 Passed title filter: {stats['passed_title_filter']} ({stats['passed_title_filter']/stats['total_videos']*100:.1f}%)")
+            logger.info(f"   🎤 Passed artist extraction: {stats['passed_artist_extraction']} ({stats['passed_artist_extraction']/stats['total_videos']*100:.1f}%)")
+            logger.info(f"   💾 Passed database checks: {stats['passed_database_checks']} ({stats['passed_database_checks']/stats['total_videos']*100:.1f}%)")
+            logger.info(f"   ✅ Passed content validation: {stats['passed_content_validation']} ({stats['passed_content_validation']/stats['total_videos']*100:.1f}%)")
+            logger.info(f"   🔗 Found social in description: {stats['found_social_in_description']}")
+            logger.info(f"   🔗 Found social via channel fallback: {stats['found_social_via_channel_fallback']}")
+            logger.info(f"   ❌ Failed social requirement: {stats['failed_social_requirement']}")
+            logger.info(f"   🎯 FINAL SUCCESS: {stats['final_success']} ({stats['final_success']/stats['total_videos']*100:.1f}%)")
+            logger.info(f"⏱️ Filtering times: Process: {filter_process_time:.1f}s, Total: {total_time:.1f}s")
             logger.info(f"🏁 Infinite scroll filtering complete: {len(processed_videos)} videos passed all filters")
             
             return processed_videos

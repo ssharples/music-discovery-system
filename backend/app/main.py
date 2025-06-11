@@ -17,13 +17,10 @@ from app.core.config import settings
 from app.core.dependencies import get_pipeline_deps, cleanup_dependencies
 from app.api import routes, websocket
 from app.agents.orchestrator import DiscoveryOrchestrator
+from app.core.logging_config import setup_enhanced_logging
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+# Enhanced logging configuration
+logger = setup_enhanced_logging()
 
 # Initialize Sentry for error tracking in production
 if SENTRY_AVAILABLE and settings.SENTRY_DSN and settings.ENVIRONMENT == "production":
@@ -44,7 +41,13 @@ background_tasks_queue = asyncio.Queue()
 async def lifespan(app: FastAPI):
     """Manage application lifecycle"""
     # Startup
-    logger.info(f"Starting Music Discovery System in {settings.ENVIRONMENT} mode...")
+    logger.info("🚀 Music Discovery API starting up with enhanced logging...")
+    logger.info(f"🔧 Environment: {settings.ENVIRONMENT}")
+    logger.info("📋 Enhanced logging features:")
+    logger.info("   ✅ Supabase HTTP requests filtered out")
+    logger.info("   ✅ Progress tracking enabled")
+    logger.info("   ✅ Timing information added")
+    logger.info("   ✅ Agentic workflow debugging enhanced")
     
     # Initialize discovery orchestrator
     app.state.orchestrator = DiscoveryOrchestrator()
@@ -187,8 +190,6 @@ async def debug_firecrawl():
         "status": "simple_check"
     }
 
-
-
 # Add global exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
@@ -197,4 +198,8 @@ async def global_exception_handler(request, exc):
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"}
-    ) 
+    )
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000) 
