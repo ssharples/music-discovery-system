@@ -284,24 +284,31 @@ class MasterDiscoveryAgent:
         
         for video in videos:
             try:
-                # Step 1: Extract artist name from video title
-                artist_name = self._extract_artist_name(video.get('title', ''))
+                video_title = video.get('title', '')
                 
-                if not artist_name:
-                    logger.debug(f"Skipping video - no artist name extracted: {video.get('title', '')}")
+                # Step 1: Validate title contains "official music video" (case insensitive)
+                if not self._validate_title_contains_search_terms(video_title):
+                    logger.debug(f"Skipping video - title doesn't contain 'official music video': {video_title}")
                     continue
                 
-                # Step 2: Check if artist already exists in database
+                # Step 2: Extract artist name from video title
+                artist_name = self._extract_artist_name(video_title)
+                
+                if not artist_name:
+                    logger.debug(f"Skipping video - no artist name extracted: {video_title}")
+                    continue
+                
+                # Step 3: Check if artist already exists in database
                 if await self._artist_exists_in_database(deps, artist_name):
                     logger.debug(f"Skipping existing artist: {artist_name}")
                     continue
                 
-                # Step 3: Validate content (check for AI/cover keywords)
-                if not self._validate_content(video.get('title', ''), video.get('description', '')):
-                    logger.debug(f"Skipping video - failed content validation: {video.get('title', '')}")
+                # Step 4: Validate content (check for AI/cover keywords)
+                if not self._validate_content(video_title, video.get('description', '')):
+                    logger.debug(f"Skipping video - failed content validation: {video_title}")
                     continue
                 
-                # Step 4: Extract social media links from description
+                # Step 5: Extract social media links from description
                 social_links = self._extract_social_links_from_description(video.get('description', ''))
                 
                 # Add processed data to video
@@ -309,7 +316,7 @@ class MasterDiscoveryAgent:
                 video['social_links'] = social_links
                 
                 processed_videos.append(video)
-                logger.debug(f"✅ Video processed: {artist_name} - {video.get('title', '')}")
+                logger.debug(f"✅ Video processed: {artist_name} - {video_title}")
                 
             except Exception as e:
                 logger.error(f"Error processing video: {e}")
@@ -796,4 +803,45 @@ class MasterDiscoveryAgent:
     def _extract_channel_id(self, url: str) -> Optional[str]:
         """Extract channel ID from YouTube URL - placeholder implementation."""
         # This would need more sophisticated URL parsing
-        return None 
+        return None
+
+    def _validate_title_contains_search_terms(self, title: str) -> bool:
+        """
+        Validate if the title contains "official music video" or acceptable variations (case insensitive).
+        """
+        if not title:
+            return False
+            
+        title_lower = title.lower()
+        
+        # Primary search term - must contain "official music video"
+        if "official music video" in title_lower:
+            return True
+            
+        # Accept close variations that are still high quality
+        acceptable_variations = [
+            "official video",     # Sometimes abbreviated
+            "music video",        # If combined with artist/song structure
+            "official mv",        # Common abbreviation
+            "official audio",     # Audio-only official releases
+        ]
+        
+        for variation in acceptable_variations:
+            if variation in title_lower:
+                # Additional validation: ensure it's structured like a proper music video
+                # Must contain typical music video patterns
+                music_patterns = [
+                    r'\w+\s*-\s*\w+',  # Artist - Song format
+                    r'\w+\s*\|\s*\w+',  # Artist | Song format  
+                    r'\w+:\s*\w+',      # Artist: Song format
+                    r'\([^)]*official[^)]*\)',  # (Official something)
+                    r'\[[^\]]*official[^\]]*\]'  # [Official something]
+                ]
+                
+                import re
+                for pattern in music_patterns:
+                    if re.search(pattern, title_lower):
+                        return True
+        
+        return False
+    
