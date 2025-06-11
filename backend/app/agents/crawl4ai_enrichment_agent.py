@@ -73,14 +73,38 @@ class Crawl4AIEnrichmentAgent:
         tasks.append(self._search_and_enrich_spotify(artist_profile.name, enriched_data))
         
         # Social media enrichment (if links available)
+        instagram_url = None
+        tiktok_url = None
+        
         if hasattr(artist_profile, 'social_links') and artist_profile.social_links:
-            if 'instagram' in artist_profile.social_links:
-                tasks.append(self._enrich_instagram(artist_profile.social_links['instagram'], enriched_data))
-            if 'tiktok' in artist_profile.social_links:
-                tasks.append(self._enrich_tiktok(artist_profile.social_links['tiktok'], enriched_data))
+            instagram_url = artist_profile.social_links.get('instagram')
+            tiktok_url = artist_profile.social_links.get('tiktok')
+            
+            if instagram_url:
+                logger.info(f"📸 Adding Instagram enrichment task: {instagram_url}")
+                tasks.append(self._enrich_instagram(instagram_url, enriched_data))
+            
+            if tiktok_url:
+                logger.info(f"🎭 Adding TikTok enrichment task: {tiktok_url}")
+                tasks.append(self._enrich_tiktok(tiktok_url, enriched_data))
+        
+        # If no social links found, try to search for them
+        if not instagram_url:
+            logger.info(f"🔍 No Instagram link found, will search by artist name")
+            tasks.append(self._search_and_enrich_instagram(artist_profile.name, enriched_data))
+        
+        if not tiktok_url:
+            logger.info(f"🔍 No TikTok link found, will search by artist name")
+            tasks.append(self._search_and_enrich_tiktok(artist_profile.name, enriched_data))
+        
+        logger.info(f"🚀 Running {len(tasks)} enrichment tasks in parallel")
         
         # Run all enrichments in parallel
-        await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Log results
+        successful_tasks = sum(1 for r in results if not isinstance(r, Exception))
+        logger.info(f"✅ Completed {successful_tasks}/{len(tasks)} enrichment tasks successfully")
         
         # Calculate enrichment score and update profile
         enriched_data.enrichment_score = self._calculate_enrichment_score(enriched_data)
@@ -128,7 +152,9 @@ class Crawl4AIEnrichmentAgent:
                     # Use regex patterns to extract data - more reliable than selectors
                     import re
                     
-                    # Extract monthly listeners using multiple patterns
+                    # Enhanced Spotify data extraction with comprehensive patterns
+                    
+                    # 1. Extract monthly listeners
                     monthly_listeners = 0
                     listener_patterns = [
                         r'([\d,]+)\s*monthly\s*listeners?',  # "X monthly listeners"
@@ -136,13 +162,13 @@ class Crawl4AIEnrichmentAgent:
                         r'"monthlyListeners":(\d+)',  # JSON data
                         r'monthlyListeners["\s:]+(\d+)',  # Alternative JSON
                         r'([\d,]+)\s*listeners\s*monthly',  # Alternative format
+                        r'"stats":\{"listeners":(\d+)',  # Stats JSON
                     ]
                     
                     for pattern in listener_patterns:
                         matches = re.findall(pattern, result.html, re.IGNORECASE)
                         if matches:
                             try:
-                                # Take the first reasonable match
                                 for match in matches:
                                     parsed = self._parse_number(match)
                                     if 0 < parsed < 1000000000:  # Reasonable range
@@ -156,22 +182,21 @@ class Crawl4AIEnrichmentAgent:
                     if monthly_listeners > 0:
                         enriched_data.profile.follower_counts['spotify_monthly_listeners'] = monthly_listeners
                         logger.info(f"✅ Found {monthly_listeners:,} monthly listeners")
-                    else:
-                        logger.warning("⚠️ Could not extract Spotify monthly listeners")
                     
-                    # Extract artist bio using patterns
+                    # 2. Extract artist bio/biography
                     bio_patterns = [
                         r'<div[^>]*data-testid[^>]*biography[^>]*>([^<]+)',
                         r'<div[^>]*about[^>]*>([^<]+)',
                         r'"biography":\s*"([^"]+)"',
                         r'artist[_-]?bio[^>]*>([^<]+)',
                         r'description[^>]*>([^<]+)',
+                        r'"about":\s*"([^"]+)"',
+                        r'<p[^>]*class="[^"]*bio[^"]*"[^>]*>([^<]+)',
                     ]
                     
                     for pattern in bio_patterns:
                         matches = re.findall(pattern, result.html, re.IGNORECASE | re.DOTALL)
                         if matches:
-                            # Take first non-empty match
                             for match in matches:
                                 clean_bio = re.sub(r'<[^>]+>', '', match).strip()
                                 if len(clean_bio) > 20:  # Reasonable bio length
@@ -181,10 +206,70 @@ class Crawl4AIEnrichmentAgent:
                             if enriched_data.profile.bio:
                                 break
                     
-                    # Extract top tracks using patterns
+                    # 3. Extract top city/location
+                    city_patterns = [
+                        r'"topCity":\s*"([^"]+)"',
+                        r'top\s*city[^>]*>([^<]+)',
+                        r'"city":\s*"([^"]+)"',
+                        r'location[^>]*>([^<]+)',
+                        r'"worldRank":\s*\d+,\s*"country":\s*"([^"]+)"',
+                    ]
+                    
+                    for pattern in city_patterns:
+                        matches = re.findall(pattern, result.html, re.IGNORECASE)
+                        if matches:
+                            top_city = matches[0].strip()
+                            if len(top_city) > 2:
+                                enriched_data.profile.metadata['spotify_top_city'] = top_city
+                                logger.info(f"✅ Found top city: {top_city}")
+                                break
+                    
+                    # 4. Extract genres
+                    genre_patterns = [
+                        r'"genres":\s*\[([^\]]+)\]',
+                        r'genre[^>]*>([^<]+)',
+                        r'"genre":\s*"([^"]+)"',
+                    ]
+                    
+                    for pattern in genre_patterns:
+                        matches = re.findall(pattern, result.html, re.IGNORECASE)
+                        if matches:
+                            genres_text = matches[0]
+                            # Parse JSON-like genre array
+                            if '"' in genres_text:
+                                genre_list = re.findall(r'"([^"]+)"', genres_text)
+                                if genre_list:
+                                    enriched_data.profile.genres = genre_list[:5]  # Limit to 5 genres
+                                    logger.info(f"✅ Found genres: {', '.join(genre_list[:3])}")
+                                    break
+                    
+                    # 5. Extract social media links from Spotify page
+                    social_link_patterns = {
+                        'instagram': r'href="(https?://(?:www\.)?instagram\.com/[^"]+)"',
+                        'twitter': r'href="(https?://(?:www\.)?(?:twitter|x)\.com/[^"]+)"',
+                        'facebook': r'href="(https?://(?:www\.)?facebook\.com/[^"]+)"',
+                        'youtube': r'href="(https?://(?:www\.)?youtube\.com/[^"]+)"',
+                        'website': r'href="(https?://[^"]+\.[^"]+)"',  # General website links
+                    }
+                    
+                    for platform, pattern in social_link_patterns.items():
+                        matches = re.findall(pattern, result.html, re.IGNORECASE)
+                        if matches:
+                            # Filter out obvious non-social links for website
+                            if platform == 'website':
+                                for link in matches:
+                                    if not any(x in link.lower() for x in ['spotify.com', 'instagram.com', 'twitter.com', 'facebook.com', 'youtube.com']):
+                                        enriched_data.profile.social_links[platform] = link
+                                        logger.info(f"✅ Found {platform}: {link}")
+                                        break
+                            else:
+                                enriched_data.profile.social_links[platform] = matches[0]
+                                logger.info(f"✅ Found {platform}: {matches[0]}")
+                    
+                    # 6. Extract top tracks using enhanced patterns
                     tracks = self._extract_spotify_tracks(result.html)
                     if tracks:
-                        enriched_data.profile.metadata['top_tracks'] = tracks[:5]
+                        enriched_data.profile.metadata['top_tracks'] = tracks[:10]  # Store up to 10 tracks
                         logger.info(f"✅ Found {len(tracks)} tracks")
                         
                         # Analyze lyrics for top tracks
@@ -540,6 +625,62 @@ class Crawl4AIEnrichmentAgent:
         except Exception as e:
             logger.error(f"❌ TikTok enrichment error: {str(e)}")
     
+    async def _search_and_enrich_instagram(self, artist_name: str, enriched_data: EnrichedArtistData):
+        """Search for artist on Instagram and enrich if found"""
+        try:
+            # Try common Instagram username patterns
+            potential_usernames = [
+                artist_name.lower().replace(' ', ''),
+                artist_name.lower().replace(' ', '_'),
+                artist_name.lower().replace(' ', '.'),
+                f"{artist_name.lower().replace(' ', '')}official",
+                f"official{artist_name.lower().replace(' ', '')}",
+            ]
+            
+            for username in potential_usernames:
+                instagram_url = f"https://instagram.com/{username}"
+                logger.info(f"🔍 Trying Instagram: {instagram_url}")
+                
+                # Quick check if this profile exists and has reasonable followers
+                await self._enrich_instagram(instagram_url, enriched_data)
+                
+                # If we found followers, we likely found the right profile
+                if enriched_data.profile.follower_counts.get('instagram', 0) > 100:
+                    logger.info(f"✅ Found Instagram profile: {instagram_url}")
+                    enriched_data.profile.social_links['instagram'] = instagram_url
+                    break
+                    
+        except Exception as e:
+            logger.debug(f"Instagram search failed for {artist_name}: {e}")
+    
+    async def _search_and_enrich_tiktok(self, artist_name: str, enriched_data: EnrichedArtistData):
+        """Search for artist on TikTok and enrich if found"""
+        try:
+            # Try common TikTok username patterns
+            potential_usernames = [
+                artist_name.lower().replace(' ', ''),
+                artist_name.lower().replace(' ', '_'),
+                artist_name.lower().replace(' ', '.'),
+                f"{artist_name.lower().replace(' ', '')}official",
+                f"official{artist_name.lower().replace(' ', '')}",
+            ]
+            
+            for username in potential_usernames:
+                tiktok_url = f"https://tiktok.com/@{username}"
+                logger.info(f"🔍 Trying TikTok: {tiktok_url}")
+                
+                # Quick check if this profile exists and has reasonable followers
+                await self._enrich_tiktok(tiktok_url, enriched_data)
+                
+                # If we found followers, we likely found the right profile
+                if enriched_data.profile.follower_counts.get('tiktok', 0) > 100:
+                    logger.info(f"✅ Found TikTok profile: {tiktok_url}")
+                    enriched_data.profile.social_links['tiktok'] = tiktok_url
+                    break
+                    
+        except Exception as e:
+            logger.debug(f"TikTok search failed for {artist_name}: {e}")
+
     async def _enrich_lyrics(self, enriched_data: EnrichedArtistData):
         """Enrich with lyrics analysis from multiple sources"""
         try:
@@ -773,23 +914,76 @@ class Crawl4AIEnrichmentAgent:
             return "No clear themes identified"
     
     def _extract_spotify_tracks(self, html: str) -> List[Dict[str, Any]]:
-        """Extract top tracks from Spotify HTML"""
+        """Extract top tracks from Spotify HTML with enhanced patterns"""
         tracks = []
         
-        # Look for track data in the HTML
-        track_pattern = r'<a[^>]*aria-label="([^"]+)"[^>]*data-testid="top-track-link"[^>]*>'
-        matches = re.findall(track_pattern, html)
+        # Multiple patterns for track extraction
+        track_patterns = [
+            # Pattern 1: aria-label with track info
+            r'<a[^>]*aria-label="([^"]+)"[^>]*data-testid="top-track-link"[^>]*>',
+            # Pattern 2: track title elements
+            r'<div[^>]*data-testid="track-title"[^>]*>([^<]+)</div>',
+            # Pattern 3: JSON track data
+            r'"name":\s*"([^"]+)"[^}]*"type":\s*"track"',
+            # Pattern 4: Track link patterns
+            r'<a[^>]*href="/track/[^"]*"[^>]*title="([^"]+)"',
+            # Pattern 5: Alternative track selectors
+            r'<span[^>]*class="[^"]*track-name[^"]*"[^>]*>([^<]+)</span>',
+        ]
         
-        for i, track_label in enumerate(matches[:10]):  # Get up to 10 tracks
-            # Parse track name from aria-label
-            track_name = track_label.split(' by ')[0] if ' by ' in track_label else track_label
+        for pattern_idx, pattern in enumerate(track_patterns):
+            matches = re.findall(pattern, html, re.IGNORECASE)
+            if matches:
+                logger.debug(f"Found tracks using pattern {pattern_idx + 1}: {len(matches)} matches")
+                
+                for i, match in enumerate(matches[:15]):  # Get up to 15 tracks
+                    # Clean track name
+                    if pattern_idx == 0:  # aria-label pattern
+                        track_name = match.split(' by ')[0] if ' by ' in match else match
+                    else:
+                        track_name = match
+                    
+                    # Clean and validate track name
+                    track_name = track_name.strip()
+                    if len(track_name) > 2 and track_name not in [t['name'] for t in tracks]:
+                        tracks.append({
+                            "name": track_name,
+                            "position": len(tracks) + 1,
+                            "source": f"pattern_{pattern_idx + 1}"
+                        })
+                
+                # If we found tracks with this pattern, don't try others
+                if tracks:
+                    break
+        
+        # Enhanced extraction: Look for play counts and popularity
+        for track in tracks:
+            # Try to find play count for this track
+            play_count_patterns = [
+                rf'{re.escape(track["name"])}[^<]*<[^>]*>([0-9,]+)\s*plays',
+                rf'track.*{re.escape(track["name"])}.*"playCount":(\d+)',
+            ]
             
-            tracks.append({
-                "name": track_name,
-                "position": i + 1
-            })
+            for pattern in play_count_patterns:
+                matches = re.findall(pattern, html, re.IGNORECASE)
+                if matches:
+                    try:
+                        track['play_count'] = self._parse_number(matches[0])
+                        break
+                    except:
+                        continue
         
-        return tracks
+        # Remove duplicates and limit
+        unique_tracks = []
+        seen_names = set()
+        for track in tracks[:10]:  # Limit to top 10
+            track_name_lower = track['name'].lower()
+            if track_name_lower not in seen_names:
+                seen_names.add(track_name_lower)
+                unique_tracks.append(track)
+        
+        logger.debug(f"Extracted {len(unique_tracks)} unique tracks from Spotify")
+        return unique_tracks
     
 
     

@@ -275,6 +275,13 @@ class MasterDiscoveryAgent:
             youtube_data = await self._crawl_youtube_channel(video_data)
             
             # Step 3: Multi-platform enrichment using Crawl4AI enrichment agent
+            # Merge any social links found from YouTube channel crawling
+            if youtube_data.get('social_links_from_channel'):
+                for platform, url in youtube_data['social_links_from_channel'].items():
+                    if platform not in artist_profile.social_links:
+                        artist_profile.social_links[platform] = url
+                        logger.info(f"🔗 Added {platform} link from YouTube channel: {url}")
+            
             enriched_data = await self.enrichment_agent.enrich_artist(artist_profile)
             
             # Step 4: Spotify API integration for additional data
@@ -311,6 +318,7 @@ class MasterDiscoveryAgent:
     def _extract_artist_name(self, title: str) -> Optional[str]:
         """
         Extract artist name from video title using comprehensive patterns.
+        Excludes featured artists and collaborations.
         """
         if not title:
             return None
@@ -334,7 +342,9 @@ class MasterDiscoveryAgent:
                     try:
                         artist_name = match.group(group_idx).strip()
                         if artist_name and self._is_valid_artist_name(artist_name):
-                            return self._clean_artist_name(artist_name)
+                            # Clean and remove featured artists
+                            cleaned_name = self._clean_artist_name(artist_name)
+                            return self._remove_featured_artists(cleaned_name)
                     except IndexError:
                         continue
         
@@ -343,7 +353,8 @@ class MasterDiscoveryAgent:
             if separator in title:
                 potential_artist = title.split(separator)[0].strip()
                 if self._is_valid_artist_name(potential_artist):
-                    return self._clean_artist_name(potential_artist)
+                    cleaned_name = self._clean_artist_name(potential_artist)
+                    return self._remove_featured_artists(cleaned_name)
         
         return None
     
@@ -389,6 +400,38 @@ class MasterDiscoveryAgent:
         name = re.sub(r'\s*(Official|Music|Video).*$', '', name, flags=re.IGNORECASE)
         
         return name.strip()
+    
+    def _remove_featured_artists(self, name: str) -> str:
+        """
+        Remove featured artists and collaborations from artist name.
+        Returns only the main artist.
+        """
+        if not name:
+            return name
+        
+        # Patterns for featured artists and collaborations
+        feature_patterns = [
+            r'\s*(?:feat\.|featuring|ft\.)\s+.+$',  # feat. Artist, featuring Artist, ft. Artist
+            r'\s*(?:with|w/)\s+.+$',               # with Artist, w/ Artist
+            r'\s*(?:vs\.?|versus)\s+.+$',          # vs Artist, versus Artist
+            r'\s*(?:&|\+|and)\s+[A-Z].+$',        # & Artist, + Artist, and Artist (only if next word is capitalized)
+            r'\s*(?:x|X)\s+[A-Z].+$',             # x Artist, X Artist (collaborations)
+            r'\s*,\s*[A-Z].+$',                    # , Artist (comma separated)
+        ]
+        
+        cleaned_name = name
+        for pattern in feature_patterns:
+            cleaned_name = re.sub(pattern, '', cleaned_name, flags=re.IGNORECASE)
+        
+        # Clean up any trailing punctuation or whitespace
+        cleaned_name = re.sub(r'[,\s]+$', '', cleaned_name).strip()
+        
+        # If we removed everything, return the original
+        if not cleaned_name or len(cleaned_name) < 2:
+            return name
+        
+        logger.debug(f"Cleaned artist name: '{name}' -> '{cleaned_name}'")
+        return cleaned_name
     
     async def _artist_exists_in_database(self, deps: PipelineDependencies, artist_name: str) -> bool:
         """
@@ -521,21 +564,143 @@ class MasterDiscoveryAgent:
         Crawl YouTube channel for subscriber count and additional social links.
         """
         try:
-            channel_id = video_data.get('channel_id')
-            if not channel_id:
+            channel_name = video_data.get('channel_name') or video_data.get('channel_title')
+            if not channel_name:
+                logger.warning("No channel name available for crawling")
                 return {}
             
-            # For now, return basic data - channel crawling would need additional implementation
+            # Try multiple YouTube channel URL formats
+            channel_urls = [
+                f"https://www.youtube.com/@{channel_name}",  # New handle format
+                f"https://www.youtube.com/c/{channel_name}",  # Custom URL
+                f"https://www.youtube.com/user/{channel_name}",  # User format
+            ]
+            
+            logger.info(f"🎬 Crawling YouTube channel: {channel_name}")
+            
+            # Use Crawl4AI to scrape channel data
+            from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
+            from crawl4ai.extraction_strategy import JsonCssExtractionStrategy
+            
+            browser_config = BrowserConfig(
+                headless=True,
+                viewport_width=1920,
+                viewport_height=1080
+            )
+            
+            # Enhanced schema for YouTube channel extraction
+            schema = {
+                "name": "YouTube Channel",
+                "fields": [
+                    {
+                        "name": "subscriber_count_text",
+                        "selector": "[data-testid='subscriber-count'], .subscriber-count, #subscriber-count, .yt-subscription-button-subscriber-count-branded-horizontal, .style-scope.ytd-c4-tabbed-header-renderer",
+                        "type": "text"
+                    },
+                    {
+                        "name": "channel_description",
+                        "selector": "[data-testid='channel-description'], .channel-description, .about-description, .yt-formatted-string",
+                        "type": "text"
+                    },
+                    {
+                        "name": "verified_badge",
+                        "selector": "[data-testid='verified-badge'], .verified-badge, .yt-icon-badge",
+                        "type": "text"
+                    },
+                    {
+                        "name": "social_links",
+                        "selector": "a[href*='instagram.com'], a[href*='twitter.com'], a[href*='tiktok.com'], a[href*='spotify.com'], a[href*='facebook.com']",
+                        "type": "list"
+                    }
+                ]
+            }
+            
+            extraction_strategy = JsonCssExtractionStrategy(schema)
+            
+            crawler_config = CrawlerRunConfig(
+                cache_mode=CacheMode.BYPASS,
+                extraction_strategy=extraction_strategy,
+                wait_until="domcontentloaded",
+                page_timeout=30000,  # 30 second timeout
+                delay_before_return_html=3.0,
+                scan_full_page=True,  # Use built-in scrolling
+                scroll_delay=0.5,
+                verbose=True
+            )
+            
+            # Try each URL format until one works
+            for channel_url in channel_urls:
+                try:
+                    logger.info(f"Trying channel URL: {channel_url}")
+                    
+                    async with AsyncWebCrawler(config=browser_config) as crawler:
+                        result = await crawler.arun(
+                            url=channel_url,
+                            config=crawler_config
+                        )
+                        
+                        if result.success and result.html:
+                            # Process extracted data
+                            channel_data = {
+                                'subscriber_count': 0,
+                                'channel_url': channel_url,
+                                'channel_description': '',
+                                'social_links_from_channel': {},
+                                'verified': False
+                            }
+                            
+                            # Parse structured extraction
+                            if result.extracted_content:
+                                try:
+                                    import json
+                                    extracted = json.loads(result.extracted_content)
+                                    
+                                    # Extract subscriber count
+                                    if extracted.get('subscriber_count_text'):
+                                        channel_data['subscriber_count'] = self._parse_subscriber_count(extracted['subscriber_count_text'])
+                                    
+                                    # Extract description
+                                    if extracted.get('channel_description'):
+                                        channel_data['channel_description'] = extracted['channel_description'][:500]
+                                    
+                                    # Extract social links
+                                    if extracted.get('social_links'):
+                                        social_links = self._extract_social_links_from_channel_links(extracted['social_links'])
+                                        channel_data['social_links_from_channel'] = social_links
+                                    
+                                    # Check verification
+                                    if extracted.get('verified_badge'):
+                                        channel_data['verified'] = True
+                                        
+                                except (json.JSONDecodeError, Exception) as e:
+                                    logger.debug(f"Error parsing extracted content: {e}")
+                            
+                            # Fallback: use regex patterns on HTML
+                            if channel_data['subscriber_count'] == 0:
+                                channel_data['subscriber_count'] = self._extract_subscriber_count_from_html(result.html)
+                            
+                            if not channel_data['social_links_from_channel']:
+                                channel_data['social_links_from_channel'] = self._extract_social_links_from_html(result.html)
+                            
+                            if channel_data['subscriber_count'] > 0 or channel_data['social_links_from_channel']:
+                                logger.info(f"✅ Successfully crawled YouTube channel: {channel_data['subscriber_count']:,} subscribers, {len(channel_data['social_links_from_channel'])} social links")
+                                return channel_data
+                            
+                except Exception as e:
+                    logger.debug(f"Failed to crawl {channel_url}: {e}")
+                    continue
+            
+            logger.warning(f"⚠️ Could not crawl any YouTube channel URLs for: {channel_name}")
             return {
                 'subscriber_count': 0,
-                'channel_url': f"https://www.youtube.com/channel/{channel_id}" if channel_id else '',
+                'channel_url': '',
                 'channel_description': '',
                 'social_links_from_channel': {},
                 'verified': False
             }
             
         except Exception as e:
-            logger.error(f"Error crawling YouTube channel: {e}")
+            logger.error(f"❌ YouTube channel crawling error: {e}")
             return {}
     
     async def _get_spotify_api_data(self, artist_name: str) -> Dict[str, Any]:
@@ -709,12 +874,23 @@ class MasterDiscoveryAgent:
                 'youtube_channel_url': youtube_data.get('channel_url', ''),
                 'spotify_id': artist_profile.spotify_id,
                 'spotify_url': artist_profile.social_links.get('spotify'),
+                # Spotify data
                 'spotify_monthly_listeners': enriched_data.profile.follower_counts.get('spotify_monthly_listeners', 0) or 0,
-                'instagram_url': artist_profile.social_links.get('instagram'),
+                'spotify_top_city': enriched_data.profile.metadata.get('spotify_top_city', ''),
+                'spotify_biography': enriched_data.profile.bio or '',
+                'spotify_genres': enriched_data.profile.genres or [],
+                # Instagram data  
+                'instagram_url': enriched_data.profile.social_links.get('instagram') or artist_profile.social_links.get('instagram'),
                 'instagram_follower_count': enriched_data.profile.follower_counts.get('instagram', 0) or 0,
-                'tiktok_url': artist_profile.social_links.get('tiktok'),
+                # TikTok data
+                'tiktok_url': enriched_data.profile.social_links.get('tiktok') or artist_profile.social_links.get('tiktok'),
                 'tiktok_follower_count': enriched_data.profile.follower_counts.get('tiktok', 0) or 0,
                 'tiktok_likes_count': enriched_data.profile.metadata.get('tiktok_likes', 0) or 0,
+                # Other social media
+                'twitter_url': enriched_data.profile.social_links.get('twitter') or artist_profile.social_links.get('twitter'),
+                'facebook_url': enriched_data.profile.social_links.get('facebook') or artist_profile.social_links.get('facebook'),
+                'website_url': enriched_data.profile.social_links.get('website') or artist_profile.social_links.get('website'),
+                # Music analysis
                 'music_theme_analysis': enriched_data.profile.metadata.get('lyrics_themes', ''),
                 'discovery_source': 'youtube',
                 'discovery_video_id': artist_profile.metadata.get('discovery_video', {}).get('video_id'),
@@ -808,4 +984,104 @@ class MasterDiscoveryAgent:
                         return True
         
         return False
+    
+    def _parse_subscriber_count(self, text: str) -> int:
+        """Parse subscriber count from text with K, M, B suffixes."""
+        try:
+            if not text:
+                return 0
+            
+            # Remove common words and clean text
+            text = text.lower().replace('subscribers', '').replace('subscriber', '').strip()
+            
+            # Handle K, M, B suffixes
+            multipliers = {'k': 1000, 'm': 1000000, 'b': 1000000000}
+            
+            for suffix, multiplier in multipliers.items():
+                if suffix in text:
+                    number = float(text.replace(suffix, '').replace(',', '').strip())
+                    return int(number * multiplier)
+            
+            # Try to parse as regular number
+            clean_number = re.sub(r'[^\d.]', '', text)
+            if clean_number:
+                return int(float(clean_number))
+            
+            return 0
+        except:
+            return 0
+    
+    def _extract_subscriber_count_from_html(self, html: str) -> int:
+        """Extract subscriber count using regex patterns."""
+        patterns = [
+            r'(\d+(?:\.\d+)?[KMB]?)\s*subscribers?',
+            r'"subscriberCountText":\{"runs":\[\{"text":"([^"]+)"\}',
+            r'"subscriberCount":(\d+)',
+            r'subscribers?["\s]*:\s*["\s]*(\d+(?:\.\d+)?[KMB]?)',
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, html, re.IGNORECASE)
+            if matches:
+                for match in matches:
+                    parsed = self._parse_subscriber_count(match)
+                    if parsed > 0:
+                        return parsed
+        return 0
+    
+    def _extract_social_links_from_channel_links(self, links: List[str]) -> Dict[str, str]:
+        """Extract social media links from channel description."""
+        social_links = {}
+        
+        for link in links:
+            if 'instagram.com' in link:
+                social_links['instagram'] = link
+            elif 'twitter.com' in link or 'x.com' in link:
+                social_links['twitter'] = link
+            elif 'tiktok.com' in link:
+                social_links['tiktok'] = link
+            elif 'spotify.com' in link:
+                social_links['spotify'] = link
+            elif 'facebook.com' in link:
+                social_links['facebook'] = link
+        
+        return social_links
+    
+    def _extract_social_links_from_html(self, html: str) -> Dict[str, str]:
+        """Extract social media links using regex patterns."""
+        social_links = {}
+        
+        # Enhanced patterns for social media links
+        link_patterns = {
+            'instagram': [
+                r'href="(https?://(?:www\.)?instagram\.com/[^"]+)"',
+                r'"(https?://(?:www\.)?instagram\.com/[^"]+)"',
+            ],
+            'twitter': [
+                r'href="(https?://(?:www\.)?(?:twitter|x)\.com/[^"]+)"',
+                r'"(https?://(?:www\.)?(?:twitter|x)\.com/[^"]+)"',
+            ],
+            'tiktok': [
+                r'href="(https?://(?:www\.)?tiktok\.com/[^"]+)"',
+                r'"(https?://(?:www\.)?tiktok\.com/[^"]+)"',
+            ],
+            'spotify': [
+                r'href="(https?://open\.spotify\.com/artist/[^"]+)"',
+                r'"(https?://open\.spotify\.com/artist/[^"]+)"',
+            ],
+            'facebook': [
+                r'href="(https?://(?:www\.)?facebook\.com/[^"]+)"',
+                r'"(https?://(?:www\.)?facebook\.com/[^"]+)"',
+            ]
+        }
+        
+        for platform, patterns in link_patterns.items():
+            for pattern in patterns:
+                matches = re.findall(pattern, html, re.IGNORECASE)
+                if matches:
+                    # Take the first valid match
+                    social_links[platform] = matches[0]
+                    break
+        
+        return social_links
  
