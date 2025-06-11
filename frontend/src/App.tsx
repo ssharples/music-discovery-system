@@ -205,8 +205,10 @@ function Dashboard() {
 
   const [refreshing, setRefreshing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [debugInfo, setDebugInfo] = useState<string>('');
 
   useEffect(() => {
+    console.log('Dashboard mounted, loading data...');
     loadDashboardData();
   }, []);
 
@@ -214,6 +216,7 @@ function Dashboard() {
     if (!autoRefresh) return;
     
     const interval = setInterval(() => {
+      console.log('Auto-refresh triggered');
       loadDashboardData(true);
     }, 30000);
     
@@ -222,41 +225,67 @@ function Dashboard() {
 
   const loadDashboardData = async (isRefresh = false) => {
     try {
+      console.log('Loading dashboard data, isRefresh:', isRefresh);
+      setDebugInfo(`Loading data... isRefresh: ${isRefresh}`);
+
       if (isRefresh) {
         setRefreshing(true);
       } else {
         setData(prev => ({ ...prev, loading: true, error: null }));
       }
 
-      const [analytics, artists, sessions] = await Promise.all([
-        apiClient.getAnalytics().catch(() => null),
-        apiClient.getArtists().catch(() => []),
-        apiClient.getSessions().catch(() => [])
+      console.log('Making API calls...');
+      const [analyticsResult, artistsResult, sessionsResult] = await Promise.allSettled([
+        apiClient.getAnalytics(),
+        apiClient.getArtists(),
+        apiClient.getSessions()
       ]);
+
+      console.log('API results:', {
+        analytics: analyticsResult.status,
+        artists: artistsResult.status,
+        sessions: sessionsResult.status
+      });
+
+      const analytics = analyticsResult.status === 'fulfilled' ? analyticsResult.value : null;
+      const artists = artistsResult.status === 'fulfilled' ? artistsResult.value : [];
+      const sessions = sessionsResult.status === 'fulfilled' ? sessionsResult.value : [];
+
+      console.log('Processed data:', { analytics, artists: artists?.length, sessions: sessions?.length });
+      setDebugInfo(`Data loaded successfully. Artists: ${artists?.length || 0}, Sessions: ${sessions?.length || 0}`);
 
       setData(prev => ({
         ...prev,
-        analytics,
+        analytics: analytics || {},
         artists: artists || [],
         sessions: sessions || [],
         loading: false,
         error: null
       }));
     } catch (error) {
+      console.error('Dashboard data loading error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load dashboard data';
+      setDebugInfo(`Error: ${errorMessage}`);
       setData(prev => ({
         ...prev,
         loading: false,
-        error: error instanceof Error ? error.message : 'Failed to load dashboard data'
+        error: errorMessage
       }));
     } finally {
       setRefreshing(false);
     }
   };
 
+  console.log('Dashboard render state:', { loading: data.loading, error: data.error, hasAnalytics: !!data.analytics });
+
   if (data.loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <LoadingSpinner />
+        <div className="text-center">
+          <LoadingSpinner />
+          <p className="mt-4 text-gray-600">Loading dashboard...</p>
+          <p className="mt-2 text-sm text-gray-500">{debugInfo}</p>
+        </div>
       </div>
     );
   }
@@ -267,6 +296,7 @@ function Dashboard() {
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
           <h3 className="text-red-800 font-medium">Error Loading Dashboard</h3>
           <p className="text-red-600 mt-1">{data.error}</p>
+          <p className="text-sm text-gray-600 mt-2">Debug: {debugInfo}</p>
           <button 
             onClick={() => loadDashboardData()}
             className="mt-3 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
@@ -278,13 +308,20 @@ function Dashboard() {
     );
   }
 
+  // Ensure we have safe data to render
+  const safeAnalytics = data.analytics || {};
+  const safeArtists = Array.isArray(data.artists) ? data.artists : [];
+  const safeSessions = Array.isArray(data.sessions) ? data.sessions : [];
+
+  console.log('Rendering dashboard with data:', { safeAnalytics, artistsCount: safeArtists.length, sessionsCount: safeSessions.length });
+
   const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7300'];
 
-  const platformData = data.analytics?.platform_metrics ? [
-    { name: 'YouTube', value: data.analytics.platform_metrics.youtube?.channels_crawled || 0 },
-    { name: 'Spotify', value: data.analytics.platform_metrics.spotify?.artists_found || 0 },
-    { name: 'Instagram', value: data.analytics.platform_metrics.instagram?.profiles_crawled || 0 },
-    { name: 'TikTok', value: data.analytics.platform_metrics.tiktok?.profiles_crawled || 0 }
+  const platformData = safeAnalytics?.platform_metrics ? [
+    { name: 'YouTube', value: safeAnalytics.platform_metrics.youtube?.channels_crawled || 0 },
+    { name: 'Spotify', value: safeAnalytics.platform_metrics.spotify?.artists_found || 0 },
+    { name: 'Instagram', value: safeAnalytics.platform_metrics.instagram?.profiles_crawled || 0 },
+    { name: 'TikTok', value: safeAnalytics.platform_metrics.tiktok?.profiles_crawled || 0 }
   ] : [
     { name: 'YouTube', value: 25 },
     { name: 'Spotify', value: 15 },
@@ -292,16 +329,23 @@ function Dashboard() {
     { name: 'TikTok', value: 20 }
   ];
 
-  const genreData = data.analytics?.genre_distribution || [
-    { genre: 'Pop', count: 45, avg_score: 75 },
-    { genre: 'Hip-Hop', count: 38, avg_score: 82 },
-    { genre: 'Electronic', count: 22, avg_score: 68 },
-    { genre: 'Rock', count: 18, avg_score: 71 },
-    { genre: 'R&B', count: 15, avg_score: 79 }
-  ];
+  const genreData = safeAnalytics?.genre_distribution && Array.isArray(safeAnalytics.genre_distribution) 
+    ? safeAnalytics.genre_distribution 
+    : [
+      { genre: 'Pop', count: 45, avg_score: 75 },
+      { genre: 'Hip-Hop', count: 38, avg_score: 82 },
+      { genre: 'Electronic', count: 22, avg_score: 68 },
+      { genre: 'Rock', count: 18, avg_score: 71 },
+      { genre: 'R&B', count: 15, avg_score: 79 }
+    ];
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
+      {/* Debug Info */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
+        <strong>Debug:</strong> {debugInfo} | Artists: {safeArtists.length} | Sessions: {safeSessions.length}
+      </div>
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -343,35 +387,35 @@ function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Total Artists"
-          value={data.analytics?.total_artists || data.artists.length || 0}
+          value={safeAnalytics?.total_artists || safeArtists.length || 0}
           change={12.5}
           icon={Users}
           color="blue"
         />
         <StatCard
           title="High Value Artists"
-          value={data.analytics?.high_value_artists || Math.floor((data.artists.length || 0) * 0.3)}
+          value={safeAnalytics?.high_value_artists || Math.floor((safeArtists.length || 0) * 0.3)}
           change={8.2}
           icon={TrendingUp}
           color="green"
         />
         <StatCard
           title="Active Sessions"
-          value={data.sessions.filter(s => s.status === 'running').length}
+          value={safeSessions.filter(s => s?.status === 'running').length}
           change={-3.1}
           icon={Activity}
           color="orange"
         />
         <StatCard
           title="Success Rate"
-          value={`${data.analytics?.quality_metrics?.validation_rate?.toFixed(1) || '87.3'}%`}
+          value={`${safeAnalytics?.quality_metrics?.validation_rate?.toFixed(1) || '87.3'}%`}
           change={5.7}
           icon={Heart}
           color="purple"
         />
       </div>
 
-      {/* Charts Row */}
+      {/* Simple Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Platform Distribution */}
         <ChartContainer title="Platform Coverage" subtitle="Data sources breakdown">
@@ -397,15 +441,14 @@ function Dashboard() {
         </ChartContainer>
 
         {/* Genre Distribution */}
-        <ChartContainer title="Genre Distribution" subtitle="Most discovered genres">
+        <ChartContainer title="Genre Distribution" subtitle="Artists by music genre">
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={genreData}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="genre" />
               <YAxis />
               <Tooltip />
-              <Bar dataKey="count" fill="#8884d8" name="Count" />
-              <Bar dataKey="avg_score" fill="#82ca9d" name="Avg Score" />
+              <Bar dataKey="count" fill="#8884d8" />
             </BarChart>
           </ResponsiveContainer>
         </ChartContainer>
@@ -413,83 +456,19 @@ function Dashboard() {
 
       {/* Recent Artists */}
       <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-semibold text-gray-900">🎭 Recent Discoveries</h2>
-          <Link 
-            to="/discovery"
-            className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-          >
-            Start New Discovery →
-          </Link>
-        </div>
-        
-        {data.artists.length > 0 ? (
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">🌟 Recent Discoveries</h3>
+        {safeArtists.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {data.artists.slice(0, 9).map((artist) => (
-              <ArtistCard key={artist.id} artist={artist} />
+            {safeArtists.slice(0, 6).map((artist, index) => (
+              <ArtistCard key={artist.id || index} artist={artist} />
             ))}
           </div>
         ) : (
-          <div className="text-center py-12">
-            <Music className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No artists found</h3>
-            <p className="text-gray-500 mb-4">Start a discovery session to find new artists.</p>
-            <Link 
-              to="/discovery"
-              className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-              <Play className="w-4 h-4 mr-2" />
-              Start Discovery
-            </Link>
+          <div className="text-center py-8 text-gray-500">
+            <Music className="w-12 h-12 mx-auto mb-4 opacity-50" />
+            <p>No artists discovered yet. Start a discovery session to see results!</p>
           </div>
         )}
-      </div>
-
-      {/* API Usage */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-lg font-semibold mb-4">📺 YouTube API Usage</h3>
-          <div className="space-y-3">
-            <div className="flex justify-between">
-              <span>Requests Made</span>
-              <span className="font-medium">{data.analytics?.api_usage?.youtube?.requests_made || 1247}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Quota Limit</span>
-              <span className="font-medium">{data.analytics?.api_usage?.youtube?.quota_limit || 10000}</span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div 
-                className="bg-blue-600 h-2 rounded-full" 
-                style={{
-                  width: `${data.analytics?.api_usage?.youtube?.quota_used_percentage || 12.47}%`
-                }}
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-lg font-semibold mb-4">🎵 Spotify API Usage</h3>
-          <div className="space-y-3">
-            <div className="flex justify-between">
-              <span>Requests Made</span>
-              <span className="font-medium">{data.analytics?.api_usage?.spotify?.requests_made || 856}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Quota Limit</span>
-              <span className="font-medium">{data.analytics?.api_usage?.spotify?.quota_limit || 5000}</span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div 
-                className="bg-green-600 h-2 rounded-full" 
-                style={{
-                  width: `${data.analytics?.api_usage?.spotify?.quota_used_percentage || 17.12}%`
-                }}
-              />
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );
@@ -723,6 +702,8 @@ function Navigation() {
 
 // Main App Component
 function App() {
+  console.log('App component rendering');
+  
   return (
     <Router>
       <div className="min-h-screen bg-gray-50">
