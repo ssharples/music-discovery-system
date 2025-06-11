@@ -495,8 +495,8 @@ class Crawl4AIYouTubeAgent:
         if upload_date != "all":
             date_map = {
                 "hour": "EgIIAQ%253D%253D",
-                "day": "EgIIAg%253D%253D",      # Today's uploads
-                "today": "EgIIAg%253D%253D",    # Alias for day
+                "day": "CAISCAgCEAEYAXAB",      # Enhanced: Today + Sort by upload date + 4K + Under 4min
+                "today": "CAISCAgCEAEYAXAB",    # Enhanced: Today + Sort by upload date + 4K + Under 4min
                 "week": "EgIIAw%253D%253D", 
                 "month": "EgIIBA%253D%253D",
                 "year": "EgIIBQ%253D%253D"
@@ -526,15 +526,15 @@ class Crawl4AIYouTubeAgent:
             )
 
     def _build_search_url(self, query: str, upload_date: str = "all") -> str:
-        """Build YouTube search URL with filters."""
+        """Build YouTube search URL with enhanced filters for music discovery."""
         base_url = f"https://www.youtube.com/results?search_query={quote_plus(query)}"
         
         if upload_date != "all":
-            # YouTube search filter parameters
+            # Enhanced YouTube search filter parameters for music discovery
             date_filters = {
                 "hour": "EgIIAQ%253D%253D",
-                "day": "EgIIAg%253D%253D",      # Today's uploads
-                "today": "EgIIAg%253D%253D",    # Alias for day
+                "day": "CAISCAgCEAEYAXAB",      # Enhanced: Today + Sort by upload date + 4K + Under 4min
+                "today": "CAISCAgCEAEYAXAB",    # Enhanced: Today + Sort by upload date + 4K + Under 4min  
                 "week": "EgIIAw%253D%253D", 
                 "month": "EgIIBA%253D%253D",
                 "year": "EgIIBQ%253D%253D"
