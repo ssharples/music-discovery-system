@@ -73,9 +73,9 @@ class MasterDiscoveryAgent:
         logger.info(f"🎵 Starting master discovery workflow (max_results: {max_results})")
         
         try:
-            # Phase 1: YouTube Video Discovery with Scrolling
-            logger.info("📺 Phase 1: YouTube video discovery with scrolling")
-            processed_videos = await self._search_and_filter_videos_with_scrolling(deps, search_query)
+            # Phase 1: YouTube Video Discovery with Infinite Scroll
+            logger.info("📺 Phase 1: YouTube video discovery with infinite scroll")
+            processed_videos = await self._search_and_filter_videos_with_infinite_scroll(deps, search_query)
             
             if not processed_videos:
                 return self._create_empty_result("No videos found that passed filtering", start_time)
@@ -142,186 +142,118 @@ class MasterDiscoveryAgent:
                 }
             }
     
-    async def _search_and_filter_videos_with_scrolling(
+    async def _search_and_filter_videos_with_infinite_scroll(
         self,
         deps: PipelineDependencies,
         search_query: str,
         target_filtered_videos: int = 100
     ) -> List[Dict[str, Any]]:
         """
-        Search YouTube with scrolling until we have enough videos that pass filters.
+        Single YouTube search with infinite scrolling until we have enough videos that pass filters.
+        Much more efficient than multiple separate searches.
         
         Args:
             deps: Pipeline dependencies
-            search_query: YouTube search query
+            search_query: YouTube search query  
             target_filtered_videos: Minimum number of videos that must pass filters
             
         Returns:
             List of processed videos that passed all filters
         """
-        processed_videos = []
-        total_attempts = 0
-        max_attempts = 10  # Prevent infinite loops
-        videos_per_search = 50  # Number to request each time
+        logger.info(f"🔄 Starting infinite scroll search - target: {target_filtered_videos} filtered videos")
         
-        logger.info(f"🔄 Starting scrolling search - target: {target_filtered_videos} filtered videos")
-        
-        while len(processed_videos) < target_filtered_videos and total_attempts < max_attempts:
-            total_attempts += 1
-            logger.info(f"📥 Search attempt {total_attempts}: Need {target_filtered_videos - len(processed_videos)} more filtered videos")
-            
-            try:
-                # Search for more videos
-                youtube_videos = await self._search_youtube_videos_batch(
-                    search_query, 
-                    videos_per_search,
-                    offset=total_attempts - 1  # Use attempt number as offset indicator
-                )
-                
-                if not youtube_videos:
-                    logger.warning(f"No videos found in attempt {total_attempts}")
-                    if total_attempts >= 3:  # After 3 attempts with no results, break
-                        break
-                    continue
-                
-                logger.info(f"Found {len(youtube_videos)} raw videos in attempt {total_attempts}")
-                
-                # Filter the new videos
-                batch_processed = await self._process_and_filter_videos(deps, youtube_videos)
-                
-                if not batch_processed:
-                    logger.warning(f"No videos passed filtering in attempt {total_attempts}")
-                    continue
-                
-                # Add new filtered videos (avoid duplicates)
-                existing_urls = {v.get('url') for v in processed_videos}
-                new_videos = [v for v in batch_processed if v.get('url') not in existing_urls]
-                
-                processed_videos.extend(new_videos)
-                
-                logger.info(f"✅ Attempt {total_attempts}: Added {len(new_videos)} new filtered videos. Total: {len(processed_videos)}")
-                
-                # Add delay between requests to be respectful
-                await asyncio.sleep(2.0)
-                
-            except Exception as e:
-                logger.error(f"❌ Error in search attempt {total_attempts}: {e}")
-                # Don't break on single failures, try again
-                await asyncio.sleep(3.0)
-                continue
-        
-        logger.info(f"🏁 Scrolling search complete: {len(processed_videos)} videos passed filters after {total_attempts} attempts")
-        return processed_videos
-    
-    async def _search_youtube_videos_batch(
-        self, 
-        search_query: str, 
-        batch_size: int = 50,
-        offset: int = 0
-    ) -> List[Dict[str, Any]]:
-        """
-        Search YouTube for videos with timeout protection and diversification.
-        """
         try:
-            logger.info(f"🔍 Searching YouTube for: '{search_query}' (batch {offset + 1})")
+            # Single search with infinite scrolling to get raw videos
+            logger.info(f"🔍 Performing infinite scroll search for: '{search_query}'")
             
-            # Use Crawl4AI YouTube agent with daily filter for fresh content with timeout
-            try:
-                # Pass offset to enable search diversification
-                result = await asyncio.wait_for(
-                    self.youtube_agent.search_videos(
-                        query=search_query,
-                        max_results=batch_size,
-                        upload_date="day",  # Daily fresh content for scheduled runs
-                        search_offset=offset  # Add diversification
-                    ),
-                    timeout=60.0  # 60 second timeout for entire search operation
-                )
-            except asyncio.TimeoutError:
-                logger.error(f"⏰ YouTube search timed out for '{search_query}' (batch {offset + 1})")
+            result = await asyncio.wait_for(
+                self.youtube_agent.search_videos_with_infinite_scroll(
+                    query=search_query,
+                    target_videos=target_filtered_videos * 5,  # Get 5x more to account for filtering
+                    upload_date="day"  # Today's uploads only
+                ),
+                timeout=300.0  # 5 minute timeout for the entire scroll session
+            )
+            
+            if not result.success or not result.videos:
+                logger.error(f"❌ Infinite scroll search failed: {result.error_message}")
                 return []
             
-            # Extract videos from the result object
-            if result.success and result.videos:
-                videos = []
-                for video in result.videos:
-                    videos.append({
-                        'title': video.title,
-                        'url': video.url,
-                        'channel_name': video.channel_name,
-                        'channel_title': video.channel_name,  # Alias for consistency
-                        'view_count': video.view_count,
-                        'duration': video.duration,
-                        'upload_date': video.upload_date,
-                        'video_id': self._extract_video_id(video.url),
-                        'channel_id': self._extract_channel_id(video.url),
-                        'description': ''  # Description not available from search
-                    })
-                return videos
-            else:
-                logger.warning(f"YouTube search failed for '{search_query}': {result.error_message}")
-                return []
+            logger.info(f"✅ Infinite scroll found {len(result.videos)} raw videos")
             
-        except Exception as e:
-            logger.error(f"❌ YouTube search failed for batch {offset + 1}: {e}")
+            # Convert videos to the expected format
+            youtube_videos = []
+            for video in result.videos:
+                youtube_videos.append({
+                    'title': video.title,
+                    'url': video.url,
+                    'channel_name': video.channel_name,
+                    'channel_title': video.channel_name,  # Alias for consistency
+                    'view_count': video.view_count,
+                    'duration': video.duration,
+                    'upload_date': video.upload_date,
+                    'video_id': self._extract_video_id(video.url),
+                    'channel_id': self._extract_channel_id(video.url),
+                    'description': ''  # Description not available from search
+                })
+            
+            logger.info(f"🔍 Processing and filtering {len(youtube_videos)} videos...")
+            
+            # Filter videos through our criteria
+            processed_videos = []
+            for video in youtube_videos:
+                try:
+                    video_title = video.get('title', '')
+                    
+                    # Step 1: Validate title contains "official music video" (case insensitive)
+                    if not self._validate_title_contains_search_terms(video_title):
+                        continue
+                    
+                    # Step 2: Extract artist name from video title
+                    artist_name = self._extract_artist_name(video_title)
+                    if not artist_name:
+                        continue
+                    
+                    # Step 3: Check if this specific video has already been processed
+                    if await self._video_exists_in_database(deps, video.get('url', '')):
+                        continue
+                    
+                    # Step 4: Check if artist already exists in database
+                    if await self._artist_exists_in_database(deps, artist_name):
+                        continue
+                    
+                    # Step 5: Validate content (check for AI/cover keywords)
+                    if not self._validate_content(video_title, video.get('description', '')):
+                        continue
+                    
+                    # Step 6: Extract social media links from description
+                    social_links = self._extract_social_links_from_description(video.get('description', ''))
+                    
+                    # Add processed data to video
+                    video['extracted_artist_name'] = artist_name
+                    video['social_links'] = social_links
+                    
+                    processed_videos.append(video)
+                    logger.debug(f"✅ Video passed filters: {artist_name} - {video_title}")
+                    
+                    # Stop if we've reached our target
+                    if len(processed_videos) >= target_filtered_videos:
+                        logger.info(f"🎯 Reached target! {len(processed_videos)} videos passed all filters")
+                        break
+                    
+                except Exception as e:
+                    logger.error(f"Error processing video: {e}")
+                    continue
+            
+            logger.info(f"🏁 Infinite scroll filtering complete: {len(processed_videos)} videos passed all filters")
+            return processed_videos
+            
+        except asyncio.TimeoutError:
+            logger.error("⏰ Infinite scroll search timed out after 5 minutes")
             return []
-    
-    async def _process_and_filter_videos(
-        self,
-        deps: PipelineDependencies,
-        videos: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """
-        Process and filter videos based on artist name extraction and content validation.
-        """
-        processed_videos = []
-        
-        for video in videos:
-            try:
-                video_title = video.get('title', '')
-                
-                # Step 1: Validate title contains "official music video" (case insensitive)
-                if not self._validate_title_contains_search_terms(video_title):
-                    logger.debug(f"Skipping video - title doesn't contain 'official music video': {video_title}")
-                    continue
-                
-                # Step 2: Extract artist name from video title
-                artist_name = self._extract_artist_name(video_title)
-                
-                if not artist_name:
-                    logger.debug(f"Skipping video - no artist name extracted: {video_title}")
-                    continue
-                
-                # Step 3: Check if this specific video has already been processed
-                if await self._video_exists_in_database(deps, video.get('url', '')):
-                    logger.debug(f"Skipping already processed video: {video_title}")
-                    continue
-                
-                # Step 4: Check if artist already exists in database
-                if await self._artist_exists_in_database(deps, artist_name):
-                    logger.debug(f"Skipping existing artist: {artist_name}")
-                    continue
-                
-                # Step 5: Validate content (check for AI/cover keywords)
-                if not self._validate_content(video_title, video.get('description', '')):
-                    logger.debug(f"Skipping video - failed content validation: {video_title}")
-                    continue
-                
-                # Step 6: Extract social media links from description
-                social_links = self._extract_social_links_from_description(video.get('description', ''))
-                
-                # Add processed data to video
-                video['extracted_artist_name'] = artist_name
-                video['social_links'] = social_links
-                
-                processed_videos.append(video)
-                logger.debug(f"✅ Video processed: {artist_name} - {video_title}")
-                
-            except Exception as e:
-                logger.error(f"Error processing video: {e}")
-                continue
-        
-        return processed_videos
+        except Exception as e:
+            logger.error(f"❌ Infinite scroll search failed: {e}")
+            return []
     
     async def _process_single_artist(
         self,

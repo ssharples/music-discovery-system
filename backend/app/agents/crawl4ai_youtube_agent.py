@@ -191,7 +191,7 @@ class Crawl4AIYouTubeAgent:
             cache_mode=CacheMode.BYPASS
         )
 
-    async def search_videos(self, query: str, max_results: int = 20, upload_date: str = "all", search_offset: int = 0) -> YouTubeSearchResult:
+    async def search_videos(self, query: str, max_results: int = 20, upload_date: str = "all") -> YouTubeSearchResult:
         """
         Search YouTube videos with advanced anti-blocking techniques.
         
@@ -219,7 +219,7 @@ class Crawl4AIYouTubeAgent:
             logger.info(f"Attempting YouTube search with strategy {strategy_index + 1}: {strategy.__name__}")
             
             try:
-                result = await strategy(query, max_results, upload_date, search_offset)
+                result = await strategy(query, max_results, upload_date)
                 if result.success and result.videos:
                     return result
                 else:
@@ -241,7 +241,7 @@ class Crawl4AIYouTubeAgent:
             error_message=error_message or "All search strategies failed"
         )
 
-    async def _search_with_basic_config(self, query: str, max_results: int, upload_date: str, search_offset: int = 0) -> YouTubeSearchResult:
+    async def _search_with_basic_config(self, query: str, max_results: int, upload_date: str) -> YouTubeSearchResult:
         """Search using basic configuration without advanced features."""
         try:
             browser_config = BrowserConfig(
@@ -261,7 +261,7 @@ class Crawl4AIYouTubeAgent:
                 verbose=True
             )
             
-            search_url = self._build_search_url(query, upload_date, search_offset)
+            search_url = self._build_search_url(query, upload_date)
             logger.info(f"🔍 Basic config search URL: {search_url}")
             
             async with AsyncWebCrawler(config=browser_config) as crawler:
@@ -302,7 +302,7 @@ class Crawl4AIYouTubeAgent:
                 success=False, error_message=f"Basic config exception: {str(e)}"
             )
 
-    async def _search_with_magic_mode(self, query: str, max_results: int, upload_date: str, search_offset: int = 0) -> YouTubeSearchResult:
+    async def _search_with_magic_mode(self, query: str, max_results: int, upload_date: str) -> YouTubeSearchResult:
         """Search using magic mode with full automation and scrolling - FAST VERSION."""
         try:
             browser_config = await self.get_browser_config()
@@ -338,7 +338,7 @@ class Crawl4AIYouTubeAgent:
             crawler_config.delay_before_return_html = 5.0  # Much faster
             crawler_config.page_timeout = 15000  # 15 second timeout
             
-            search_url = self._build_search_url(query, upload_date, search_offset)
+            search_url = self._build_search_url(query, upload_date)
             logger.info(f"🔍 Magic mode search URL: {search_url}")
             
             async with AsyncWebCrawler(config=browser_config) as crawler:
@@ -526,8 +526,8 @@ class Crawl4AIYouTubeAgent:
                 error_message=None if videos else "No videos extracted from mobile emulation"
             )
 
-    def _build_search_url(self, query: str, upload_date: str = "all", search_offset: int = 0) -> str:
-        """Build YouTube search URL with enhanced filters for music discovery and diversification."""
+    def _build_search_url(self, query: str, upload_date: str = "all") -> str:
+        """Build YouTube search URL with enhanced filters for music discovery."""
         base_url = f"https://www.youtube.com/results?search_query={quote_plus(query)}"
         
         if upload_date != "all":
@@ -544,20 +544,8 @@ class Crawl4AIYouTubeAgent:
             if upload_date in date_filters:
                 base_url += f"&sp={date_filters[upload_date]}"
         
-        # Add diversification parameters to get different results each time
-        if search_offset > 0:
-            # Add search diversification techniques
-            diversification_params = [
-                f"&time={int(time.time())}",  # Timestamp for cache busting
-                f"&offset={search_offset * 20}",  # Simulated pagination
-                f"&gl=US&hl=en",  # Ensure US/English results
-                f"&t={random.randint(1000, 9999)}",  # Random cache buster
-            ]
-            
-            # Add some of these parameters randomly
-            num_params = random.randint(1, 3)
-            selected_params = random.sample(diversification_params, num_params)
-            base_url += ''.join(selected_params)
+        # Add parameters for consistent English results
+        base_url += "&gl=US&hl=en"
         
         return base_url
 
@@ -807,3 +795,157 @@ class Crawl4AIYouTubeAgent:
         """Estimate costs for video discovery operations."""
         # Crawl4AI doesn't have direct API costs, just estimate infrastructure
         return 0.0  # Free for now, could add server/bandwidth costs later 
+
+    async def search_videos_with_infinite_scroll(
+        self, 
+        query: str, 
+        target_videos: int = 100, 
+        upload_date: str = "day"
+    ) -> YouTubeSearchResult:
+        """
+        Single search with infinite scrolling until target number of videos found.
+        Much more efficient than multiple separate searches.
+        """
+        try:
+            browser_config = await self.get_browser_config()
+            
+            # Enhanced crawler config for infinite scrolling
+            crawler_config = CrawlerRunConfig(
+                cache_mode=CacheMode.BYPASS,
+                wait_until="domcontentloaded",
+                page_timeout=60000,  # 60 second timeout for long scrolling session
+                delay_before_return_html=2.0,  # Initial delay
+                verbose=True,
+                simulate_user=True,
+                magic=True
+            )
+            
+            search_url = self._build_search_url(query, upload_date)
+            logger.info(f"🔍 Starting infinite scroll search: {search_url}")
+            logger.info(f"🎯 Target: {target_videos} videos")
+            
+            async with AsyncWebCrawler(config=browser_config) as crawler:
+                # Step 1: Load initial page
+                logger.info("📄 Loading initial search page...")
+                result = await crawler.arun(url=search_url, config=crawler_config)
+                
+                if not result.success:
+                    logger.error(f"❌ Initial page load failed: {result.error_message}")
+                    return YouTubeSearchResult(
+                        query=query, videos=[], total_results=0,
+                        success=False, error_message=f"Initial page load failed: {result.error_message}"
+                    )
+                
+                # Step 2: Infinite scroll with video extraction and filtering
+                all_videos = []
+                scroll_attempts = 0
+                max_scroll_attempts = 50  # Prevent infinite loops
+                no_new_videos_count = 0
+                max_no_new_videos = 5  # Stop if no new videos found after 5 attempts
+                
+                logger.info("🔄 Starting infinite scroll until target reached...")
+                
+                while len(all_videos) < target_videos and scroll_attempts < max_scroll_attempts:
+                    scroll_attempts += 1
+                    logger.info(f"📜 Scroll attempt {scroll_attempts}: Found {len(all_videos)}/{target_videos} videos")
+                    
+                    # Extract videos from current page state
+                    current_videos = await self._extract_videos_from_html(result.html, target_videos * 2)
+                    
+                    # Remove duplicates by video ID
+                    video_ids_seen = {v.video_id for v in all_videos}
+                    new_videos = [v for v in current_videos if v.video_id not in video_ids_seen]
+                    
+                    if new_videos:
+                        all_videos.extend(new_videos)
+                        no_new_videos_count = 0
+                        logger.info(f"✅ Found {len(new_videos)} new videos, total: {len(all_videos)}")
+                    else:
+                        no_new_videos_count += 1
+                        logger.warning(f"⚠️ No new videos found (attempt {no_new_videos_count}/{max_no_new_videos})")
+                        
+                        if no_new_videos_count >= max_no_new_videos:
+                            logger.warning("🛑 Stopping scroll - no new videos found after multiple attempts")
+                            break
+                    
+                    # If we've reached our target, stop scrolling
+                    if len(all_videos) >= target_videos:
+                        logger.info(f"🎉 Target reached! Found {len(all_videos)} videos")
+                        break
+                    
+                    # Scroll down to load more videos with intelligent JavaScript
+                    scroll_js = f"""
+                    (function() {{
+                        console.log('Infinite scroll attempt {scroll_attempts}...');
+                        
+                        // Multiple scroll strategies for better video loading
+                        let scrollDistance = window.innerHeight * 2;  // Scroll 2 viewport heights
+                        let currentPosition = window.pageYOffset;
+                        
+                        // Smooth scroll down
+                        window.scrollTo({{
+                            top: currentPosition + scrollDistance,
+                            behavior: 'smooth'
+                        }});
+                        
+                        // Wait for content to load, then scroll a bit more
+                        setTimeout(() => {{
+                            window.scrollBy(0, 500);
+                            console.log('Additional scroll applied');
+                        }}, 1500);
+                        
+                        // Simulate user behavior - random small movements
+                        setTimeout(() => {{
+                            window.scrollBy(0, Math.random() * 200 - 100);
+                        }}, 2000);
+                        
+                        console.log('Scroll completed, waiting for new content...');
+                    }})();
+                    """
+                    
+                    # Execute scroll and wait for new content
+                    crawler_config.js_code = scroll_js
+                    crawler_config.delay_before_return_html = 4.0  # Wait for content to load
+                    
+                    # Re-crawl the page to get new content
+                    logger.info("🌐 Scrolling and waiting for new content...")
+                    result = await crawler.arun(url=search_url, config=crawler_config)
+                    
+                    if not result.success:
+                        logger.warning(f"⚠️ Scroll attempt {scroll_attempts} failed, continuing...")
+                        continue
+                    
+                    # Brief delay between scroll attempts
+                    await asyncio.sleep(1.0)
+                
+                # Limit to target number and remove duplicates
+                unique_videos = []
+                seen_ids = set()
+                for video in all_videos:
+                    if video.video_id not in seen_ids:
+                        unique_videos.append(video)
+                        seen_ids.add(video.video_id)
+                        if len(unique_videos) >= target_videos:
+                            break
+                
+                logger.info(f"🏁 Infinite scroll complete: {len(unique_videos)} unique videos found")
+                return YouTubeSearchResult(
+                    query=query,
+                    videos=unique_videos,
+                    total_results=len(unique_videos),
+                    success=len(unique_videos) > 0,
+                    error_message=None if unique_videos else "No videos found with infinite scroll"
+                )
+                
+        except asyncio.TimeoutError:
+            logger.error("⏰ Infinite scroll search timed out")
+            return YouTubeSearchResult(
+                query=query, videos=[], total_results=0,
+                success=False, error_message="Infinite scroll search timed out"
+            )
+        except Exception as e:
+            logger.error(f"💥 Infinite scroll exception: {str(e)}")
+            return YouTubeSearchResult(
+                query=query, videos=[], total_results=0,
+                success=False, error_message=f"Infinite scroll exception: {str(e)}"
+            ) 
