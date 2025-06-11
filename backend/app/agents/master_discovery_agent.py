@@ -169,7 +169,7 @@ class MasterDiscoveryAgent:
             result = await asyncio.wait_for(
                 self.youtube_agent.search_videos_with_infinite_scroll(
                     query=search_query,
-                    target_videos=target_filtered_videos * 5,  # Get 5x more to account for filtering
+                    target_videos=target_filtered_videos * 3,  # Get 3x more to account for filtering
                     upload_date="day"  # Today's uploads only
                 ),
                 timeout=300.0  # 5 minute timeout for the entire scroll session

@@ -557,13 +557,11 @@ class DiscoveryOrchestrator:
             control['is_paused'] = True
             logger.info(f"⏸️ Session {session_id} paused")
         
-        # If paused, wait for resume
-        while control['should_pause'] and not control['should_stop']:
-            time.sleep(1)  # Check every second
-            
-        if control['is_paused'] and not control['should_pause']:
-            control['is_paused'] = False
-            logger.info(f"▶️ Session {session_id} resumed")
+        # For paused sessions, we just return False to stop the session
+        # (The resume functionality would restart the pipeline)
+        if control['should_pause'] or control['is_paused']:
+            logger.info(f"⏸️ Session {session_id} is paused")
+            return False
         
         return not control['should_stop']
     
