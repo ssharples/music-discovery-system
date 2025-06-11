@@ -198,9 +198,15 @@ class MasterDiscoveryAgent:
             logger.info(f"🔍 Performing infinite scroll search for: '{search_query}'")
             scroll_start = time.time()
             
-            videos = await self.youtube_agent.search_with_infinite_scroll(search_query)
+            search_result = await self.youtube_agent.search_videos_with_infinite_scroll(search_query)
             
             scroll_time = time.time() - scroll_start
+            
+            if not search_result.success:
+                logger.error(f"❌ Infinite scroll search failed: {search_result.error_message}")
+                return []
+            
+            videos = search_result.videos
             logger.info(f"✅ Infinite scroll found {len(videos)} raw videos ⏱️ {scroll_time:.1f}s")
             
             if not videos:
@@ -230,8 +236,8 @@ class MasterDiscoveryAgent:
             
             for i, video in enumerate(videos, 1):
                 video_start_time = time.time()
-                video_title = video.get('title', 'Unknown')
-                video_id = video.get('video_id', 'Unknown')
+                video_title = getattr(video, 'title', 'Unknown')
+                video_id = getattr(video, 'video_id', 'Unknown')
                 
                 try:
                     progress_logger.debug(f"🔍 Processing video {i}: '{video_title[:50]}...'")
@@ -267,7 +273,7 @@ class MasterDiscoveryAgent:
                         progress_logger.debug(f"⏭️ Video {i} skipped - artist '{artist_name}' already exists ⏱️ {step_time:.3f}s")
                         continue
                     
-                    if await self._video_exists_in_database(deps, video.get('url', '')):
+                    if await self._video_exists_in_database(deps, getattr(video, 'url', '')):
                         step_time = time.time() - step_start
                         progress_logger.debug(f"⏭️ Video {i} skipped - video already processed ⏱️ {step_time:.3f}s")
                         continue
@@ -278,7 +284,7 @@ class MasterDiscoveryAgent:
                     
                     # Step 4: Content validation
                     step_start = time.time()
-                    description = video.get('description', '')
+                    description = getattr(video, 'description', '')
                     if not self._validate_content(video_title, description):
                         step_time = time.time() - step_start
                         progress_logger.debug(f"❌ Video {i} failed content validation ⏱️ {step_time:.3f}s")
@@ -310,7 +316,7 @@ class MasterDiscoveryAgent:
                         
                         # Fallback: Try to extract social links from YouTube channel About page
                         try:
-                            channel_social_links = await self._extract_social_from_channel(video.get('channel_url'))
+                            channel_social_links = await self._extract_social_from_channel(getattr(video, 'channel_url', None))
                             if channel_social_links:
                                 progress_logger.debug(f"✅ Video {i} found social links from channel: {list(channel_social_links.keys())}")
                                 
@@ -355,12 +361,25 @@ class MasterDiscoveryAgent:
                     video_total_time = time.time() - video_start_time
                     progress_logger.step(f"✅ Video {i} PASSED ALL FILTERS: '{artist_name}' has social links ({social_source}): {list(cleaned_links_dict.keys())} ⏱️ Total: {video_total_time:.3f}s")
                     
-                    # Add processed data to video
-                    video['extracted_artist_name'] = artist_name
-                    video['social_links'] = cleaned_links_dict
-                    video['social_source'] = social_source  # Track where social links came from
+                    # Convert video dataclass to dict and add processed data
+                    video_dict = {
+                        'title': video.title,
+                        'url': video.url,
+                        'channel_name': video.channel_name,
+                        'view_count': video.view_count,
+                        'duration': video.duration,
+                        'upload_date': video.upload_date,
+                        'video_id': video.video_id,
+                        'thumbnail': getattr(video, 'thumbnail', None),
+                        'description': getattr(video, 'description', ''),
+                        'channel_url': getattr(video, 'channel_url', None),
+                        'channel_id': getattr(video, 'channel_id', None),
+                        'extracted_artist_name': artist_name,
+                        'social_links': cleaned_links_dict,
+                        'social_source': social_source  # Track where social links came from
+                    }
                     
-                    processed_videos.append(video)
+                    processed_videos.append(video_dict)
                     stats['final_success'] += 1
                     
                     # Stop if we've reached our target
