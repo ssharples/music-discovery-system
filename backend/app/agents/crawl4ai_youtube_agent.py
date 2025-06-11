@@ -7,6 +7,7 @@ import logging
 import random
 from typing import List, Dict, Any, Optional
 from urllib.parse import quote_plus
+import time
 
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode, GeolocationConfig
 from crawl4ai.models import CrawlResult
@@ -190,7 +191,7 @@ class Crawl4AIYouTubeAgent:
             cache_mode=CacheMode.BYPASS
         )
 
-    async def search_videos(self, query: str, max_results: int = 20, upload_date: str = "all") -> YouTubeSearchResult:
+    async def search_videos(self, query: str, max_results: int = 20, upload_date: str = "all", search_offset: int = 0) -> YouTubeSearchResult:
         """
         Search YouTube videos with advanced anti-blocking techniques.
         
@@ -218,7 +219,7 @@ class Crawl4AIYouTubeAgent:
             logger.info(f"Attempting YouTube search with strategy {strategy_index + 1}: {strategy.__name__}")
             
             try:
-                result = await strategy(query, max_results, upload_date)
+                result = await strategy(query, max_results, upload_date, search_offset)
                 if result.success and result.videos:
                     return result
                 else:
@@ -240,7 +241,7 @@ class Crawl4AIYouTubeAgent:
             error_message=error_message or "All search strategies failed"
         )
 
-    async def _search_with_basic_config(self, query: str, max_results: int, upload_date: str) -> YouTubeSearchResult:
+    async def _search_with_basic_config(self, query: str, max_results: int, upload_date: str, search_offset: int = 0) -> YouTubeSearchResult:
         """Search using basic configuration without advanced features."""
         try:
             browser_config = BrowserConfig(
@@ -260,7 +261,7 @@ class Crawl4AIYouTubeAgent:
                 verbose=True
             )
             
-            search_url = self._build_search_url(query, upload_date)
+            search_url = self._build_search_url(query, upload_date, search_offset)
             logger.info(f"🔍 Basic config search URL: {search_url}")
             
             async with AsyncWebCrawler(config=browser_config) as crawler:
@@ -301,7 +302,7 @@ class Crawl4AIYouTubeAgent:
                 success=False, error_message=f"Basic config exception: {str(e)}"
             )
 
-    async def _search_with_magic_mode(self, query: str, max_results: int, upload_date: str) -> YouTubeSearchResult:
+    async def _search_with_magic_mode(self, query: str, max_results: int, upload_date: str, search_offset: int = 0) -> YouTubeSearchResult:
         """Search using magic mode with full automation and scrolling - FAST VERSION."""
         try:
             browser_config = await self.get_browser_config()
@@ -337,7 +338,7 @@ class Crawl4AIYouTubeAgent:
             crawler_config.delay_before_return_html = 5.0  # Much faster
             crawler_config.page_timeout = 15000  # 15 second timeout
             
-            search_url = self._build_search_url(query, upload_date)
+            search_url = self._build_search_url(query, upload_date, search_offset)
             logger.info(f"🔍 Magic mode search URL: {search_url}")
             
             async with AsyncWebCrawler(config=browser_config) as crawler:
@@ -525,8 +526,8 @@ class Crawl4AIYouTubeAgent:
                 error_message=None if videos else "No videos extracted from mobile emulation"
             )
 
-    def _build_search_url(self, query: str, upload_date: str = "all") -> str:
-        """Build YouTube search URL with enhanced filters for music discovery."""
+    def _build_search_url(self, query: str, upload_date: str = "all", search_offset: int = 0) -> str:
+        """Build YouTube search URL with enhanced filters for music discovery and diversification."""
         base_url = f"https://www.youtube.com/results?search_query={quote_plus(query)}"
         
         if upload_date != "all":
@@ -539,8 +540,24 @@ class Crawl4AIYouTubeAgent:
                 "month": "EgIIBA%253D%253D",
                 "year": "EgIIBQ%253D%253D"
             }
+            
             if upload_date in date_filters:
                 base_url += f"&sp={date_filters[upload_date]}"
+        
+        # Add diversification parameters to get different results each time
+        if search_offset > 0:
+            # Add search diversification techniques
+            diversification_params = [
+                f"&time={int(time.time())}",  # Timestamp for cache busting
+                f"&offset={search_offset * 20}",  # Simulated pagination
+                f"&gl=US&hl=en",  # Ensure US/English results
+                f"&t={random.randint(1000, 9999)}",  # Random cache buster
+            ]
+            
+            # Add some of these parameters randomly
+            num_params = random.randint(1, 3)
+            selected_params = random.sample(diversification_params, num_params)
+            base_url += ''.join(selected_params)
         
         return base_url
 

@@ -220,26 +220,20 @@ class MasterDiscoveryAgent:
         offset: int = 0
     ) -> List[Dict[str, Any]]:
         """
-        Search YouTube for a batch of videos with offset simulation.
-        
-        Args:
-            search_query: YouTube search query
-            batch_size: Number of videos to request
-            offset: Attempt number to vary search slightly
-            
-        Returns:
-            List of video dictionaries
+        Search YouTube for videos with timeout protection and diversification.
         """
         try:
             logger.info(f"🔍 Searching YouTube for: '{search_query}' (batch {offset + 1})")
             
             # Use Crawl4AI YouTube agent with daily filter for fresh content with timeout
             try:
+                # Pass offset to enable search diversification
                 result = await asyncio.wait_for(
                     self.youtube_agent.search_videos(
                         query=search_query,
                         max_results=batch_size,
-                        upload_date="day"  # Daily fresh content for scheduled runs
+                        upload_date="day",  # Daily fresh content for scheduled runs
+                        search_offset=offset  # Add diversification
                     ),
                     timeout=60.0  # 60 second timeout for entire search operation
                 )
@@ -298,17 +292,22 @@ class MasterDiscoveryAgent:
                     logger.debug(f"Skipping video - no artist name extracted: {video_title}")
                     continue
                 
-                # Step 3: Check if artist already exists in database
+                # Step 3: Check if this specific video has already been processed
+                if await self._video_exists_in_database(deps, video.get('url', '')):
+                    logger.debug(f"Skipping already processed video: {video_title}")
+                    continue
+                
+                # Step 4: Check if artist already exists in database
                 if await self._artist_exists_in_database(deps, artist_name):
                     logger.debug(f"Skipping existing artist: {artist_name}")
                     continue
                 
-                # Step 4: Validate content (check for AI/cover keywords)
+                # Step 5: Validate content (check for AI/cover keywords)
                 if not self._validate_content(video_title, video.get('description', '')):
                     logger.debug(f"Skipping video - failed content validation: {video_title}")
                     continue
                 
-                # Step 5: Extract social media links from description
+                # Step 6: Extract social media links from description
                 social_links = self._extract_social_links_from_description(video.get('description', ''))
                 
                 # Add processed data to video
@@ -461,13 +460,45 @@ class MasterDiscoveryAgent:
     
     async def _artist_exists_in_database(self, deps: PipelineDependencies, artist_name: str) -> bool:
         """
-        Check if artist already exists in Supabase database.
+        Check if artist already exists in Supabase database using exact and fuzzy matching.
         """
         try:
-            response = deps.supabase.table("artist").select("id").ilike("name", f"%{artist_name}%").execute()
-            return len(response.data) > 0
+            # First try exact match
+            exact_response = deps.supabase.table("artists").select("id").eq("name", artist_name).execute()
+            if len(exact_response.data) > 0:
+                logger.debug(f"Found exact match for artist: {artist_name}")
+                return True
+            
+            # Then try fuzzy match with cleaned names
+            cleaned_name = self._clean_artist_name(artist_name).lower()
+            fuzzy_response = deps.supabase.table("artists").select("id", "name").execute()
+            
+            for existing_artist in fuzzy_response.data:
+                existing_cleaned = self._clean_artist_name(existing_artist['name']).lower()
+                if existing_cleaned == cleaned_name:
+                    logger.debug(f"Found fuzzy match: {artist_name} -> {existing_artist['name']}")
+                    return True
+            
+            return False
+            
         except Exception as e:
             logger.error(f"Error checking artist existence: {e}")
+            return False
+    
+    async def _video_exists_in_database(self, deps: PipelineDependencies, video_url: str) -> bool:
+        """
+        Check if this specific video has already been processed.
+        """
+        try:
+            video_id = self._extract_video_id(video_url)
+            if not video_id:
+                return False
+                
+            response = deps.supabase.table("artists").select("id").eq("discovery_video_id", video_id).execute()
+            return len(response.data) > 0
+            
+        except Exception as e:
+            logger.error(f"Error checking video existence: {e}")
             return False
     
     def _validate_content(self, title: str, description: str) -> bool:

@@ -11,6 +11,7 @@ class ArtistProfile(BaseModel):
     youtube_channel_name: Optional[str] = None
     instagram_handle: Optional[str] = None
     spotify_id: Optional[str] = None
+    spotify_url: Optional[str] = None
     email: Optional[str] = None
     website: Optional[str] = None
     genres: List[str] = Field(default_factory=list)
