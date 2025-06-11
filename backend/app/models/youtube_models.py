@@ -16,6 +16,8 @@ class YouTubeVideo:
     video_id: Optional[str] = None
     thumbnail: Optional[str] = None
     description: Optional[str] = None
+    channel_url: Optional[str] = None  # Direct URL to the channel page
+    channel_id: Optional[str] = None   # Channel ID or handle (@username)
 
     def __post_init__(self):
         """Extract video ID from URL if not provided."""

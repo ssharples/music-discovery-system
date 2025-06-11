@@ -229,12 +229,25 @@ class MasterDiscoveryAgent:
                     # Step 6: Extract social media links from description
                     social_links = self._extract_social_links_from_description(video.get('description', ''))
                     
+                    # Step 7: CRITICAL FILTER - Only process artists with existing social media links
+                    if not social_links:
+                        logger.debug(f"⏭️ Skipping {artist_name} - no social media links found in description")
+                        continue
+                    
+                    # Must have at least one of: Spotify, Instagram, or TikTok
+                    has_required_social = any(platform in social_links for platform in ['spotify', 'instagram', 'tiktok'])
+                    if not has_required_social:
+                        logger.debug(f"⏭️ Skipping {artist_name} - no Spotify/Instagram/TikTok links found")
+                        continue
+                    
+                    logger.info(f"✅ Artist {artist_name} has social links: {list(social_links.keys())}")
+                    
                     # Add processed data to video
                     video['extracted_artist_name'] = artist_name
                     video['social_links'] = social_links
                     
                     processed_videos.append(video)
-                    logger.debug(f"✅ Video passed filters: {artist_name} - {video_title}")
+                    logger.debug(f"✅ Video passed all filters: {artist_name} - {video_title}")
                     
                     # Stop if we've reached our target
                     if len(processed_videos) >= target_filtered_videos:
@@ -491,33 +504,89 @@ class MasterDiscoveryAgent:
     
     def _extract_social_links_from_description(self, description: str) -> Dict[str, str]:
         """
-        Extract social media links from video description.
+        Extract social media links from video description with comprehensive patterns.
         """
         if not description:
             return {}
         
         links = {}
         
-        # Instagram
-        instagram_match = re.search(r'instagram\.com/([a-zA-Z0-9_.]+)', description, re.IGNORECASE)
-        if instagram_match:
-            links['instagram'] = f"https://instagram.com/{instagram_match.group(1)}"
+        # Instagram - multiple patterns
+        instagram_patterns = [
+            r'(?:https?://)?(?:www\.)?instagram\.com/([a-zA-Z0-9_.]+)/?',
+            r'@([a-zA-Z0-9_.]+)(?:\s|$)',  # @username format (if clearly Instagram context)
+            r'IG:?\s*@?([a-zA-Z0-9_.]+)',   # IG: @username
+            r'Instagram:?\s*@?([a-zA-Z0-9_.]+)',  # Instagram: @username
+        ]
         
-        # TikTok
-        tiktok_match = re.search(r'tiktok\.com/@([a-zA-Z0-9_.]+)', description, re.IGNORECASE)
-        if tiktok_match:
-            links['tiktok'] = f"https://tiktok.com/@{tiktok_match.group(1)}"
+        for pattern in instagram_patterns:
+            match = re.search(pattern, description, re.IGNORECASE)
+            if match and 'instagram' not in links:
+                username = match.group(1)
+                if len(username) > 1 and not username.startswith('_'):  # Basic validation
+                    links['instagram'] = f"https://instagram.com/{username}"
+                    break
         
-        # Spotify
-        spotify_match = re.search(r'open\.spotify\.com/artist/([a-zA-Z0-9]+)', description, re.IGNORECASE)
-        if spotify_match:
-            links['spotify'] = f"https://open.spotify.com/artist/{spotify_match.group(1)}"
+        # TikTok - multiple patterns
+        tiktok_patterns = [
+            r'(?:https?://)?(?:www\.)?tiktok\.com/@([a-zA-Z0-9_.]+)/?',
+            r'TikTok:?\s*@?([a-zA-Z0-9_.]+)',
+            r'TT:?\s*@?([a-zA-Z0-9_.]+)',
+        ]
         
-        # Twitter/X
-        twitter_match = re.search(r'(?:twitter\.com|x\.com)/([a-zA-Z0-9_]+)', description, re.IGNORECASE)
-        if twitter_match:
-            links['twitter'] = f"https://twitter.com/{twitter_match.group(1)}"
+        for pattern in tiktok_patterns:
+            match = re.search(pattern, description, re.IGNORECASE)
+            if match and 'tiktok' not in links:
+                username = match.group(1)
+                if len(username) > 1:
+                    links['tiktok'] = f"https://tiktok.com/@{username}"
+                    break
         
+        # Spotify - multiple patterns
+        spotify_patterns = [
+            r'(?:https?://)?open\.spotify\.com/artist/([a-zA-Z0-9]+)',
+            r'spotify\.com/artist/([a-zA-Z0-9]+)',
+            r'Spotify:?\s*(?:https?://)?(?:open\.)?spotify\.com/artist/([a-zA-Z0-9]+)',
+        ]
+        
+        for pattern in spotify_patterns:
+            match = re.search(pattern, description, re.IGNORECASE)
+            if match and 'spotify' not in links:
+                artist_id = match.group(1)
+                if len(artist_id) == 22:  # Spotify artist ID length
+                    links['spotify'] = f"https://open.spotify.com/artist/{artist_id}"
+                    break
+        
+        # Twitter/X - multiple patterns
+        twitter_patterns = [
+            r'(?:https?://)?(?:www\.)?(?:twitter\.com|x\.com)/([a-zA-Z0-9_]+)/?',
+            r'Twitter:?\s*@?([a-zA-Z0-9_]+)',
+            r'X:?\s*@?([a-zA-Z0-9_]+)',
+        ]
+        
+        for pattern in twitter_patterns:
+            match = re.search(pattern, description, re.IGNORECASE)
+            if match and 'twitter' not in links:
+                username = match.group(1)
+                if len(username) > 1:
+                    links['twitter'] = f"https://twitter.com/{username}"
+                    break
+        
+        # Facebook
+        facebook_patterns = [
+            r'(?:https?://)?(?:www\.)?facebook\.com/([a-zA-Z0-9_.]+)/?',
+            r'Facebook:?\s*(?:https?://)?(?:www\.)?facebook\.com/([a-zA-Z0-9_.]+)/?',
+        ]
+        
+        for pattern in facebook_patterns:
+            match = re.search(pattern, description, re.IGNORECASE)
+            if match and 'facebook' not in links:
+                page_name = match.group(1)
+                if len(page_name) > 1:
+                    links['facebook'] = f"https://facebook.com/{page_name}"
+                    break
+        
+        logger.debug(f"Extracted social links from description: {links}")
         return links
     
     def _create_artist_profile(self, video_data: Dict[str, Any]) -> ArtistProfile:
@@ -562,19 +631,47 @@ class MasterDiscoveryAgent:
     async def _crawl_youtube_channel(self, video_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Crawl YouTube channel for subscriber count and additional social links.
+        Uses actual channel URL from video data if available.
         """
         try:
-            channel_name = video_data.get('channel_name') or video_data.get('channel_title')
-            if not channel_name:
-                logger.warning("No channel name available for crawling")
-                return {}
+            # First priority: use actual channel URL if available
+            channel_url = video_data.get('channel_url')
             
-            # Try multiple YouTube channel URL formats
-            channel_urls = [
-                f"https://www.youtube.com/@{channel_name}",  # New handle format
-                f"https://www.youtube.com/c/{channel_name}",  # Custom URL
-                f"https://www.youtube.com/user/{channel_name}",  # User format
-            ]
+            if channel_url:
+                logger.info(f"🎬 Using extracted channel URL: {channel_url}")
+                channel_urls = [channel_url]  # Use the actual extracted URL
+            else:
+                # Fallback: construct URLs from channel info
+                channel_name = video_data.get('channel_name') or video_data.get('channel_title')
+                channel_id = video_data.get('channel_id')
+                
+                if not channel_name and not channel_id:
+                    logger.warning("No channel information available for crawling")
+                    return {}
+                
+                # Build URLs based on available information
+                channel_urls = []
+                
+                if channel_id:
+                    if channel_id.startswith('@'):
+                        channel_urls.append(f"https://www.youtube.com/{channel_id}")
+                    elif len(channel_id) == 24:  # YouTube channel ID format
+                        channel_urls.append(f"https://www.youtube.com/channel/{channel_id}")
+                    else:
+                        channel_urls.extend([
+                            f"https://www.youtube.com/c/{channel_id}",
+                            f"https://www.youtube.com/user/{channel_id}"
+                        ])
+                
+                if channel_name:
+                    channel_urls.extend([
+                        f"https://www.youtube.com/@{channel_name}",
+                        f"https://www.youtube.com/c/{channel_name}",
+                        f"https://www.youtube.com/user/{channel_name}"
+                    ])
+                
+                # Remove duplicates while preserving order
+                channel_urls = list(dict.fromkeys(channel_urls))
             
             logger.info(f"🎬 Crawling YouTube channel: {channel_name}")
             

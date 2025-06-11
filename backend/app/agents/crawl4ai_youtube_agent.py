@@ -727,23 +727,70 @@ class Crawl4AIYouTubeAgent:
                 logger.debug(f"No URL found for title: {title}")
                 return None
             
-            # Extract channel name with more fallbacks
+            # Extract channel name AND channel URL with more fallbacks
             channel_name = "Unknown"
-            channel_selectors = self.selectors['channel'] + [
-                'a[href*="/channel/"]',
-                'a[href*="/@"]',
-                '.ytd-channel-name',
-                '[data-testid*="channel"]',
-                'span[class*="channel"]',
+            channel_url = None
+            channel_id = None
+            
+            # Look for channel links first (to get URL and ID)
+            channel_link_selectors = [
+                'a[href*="/channel/"]',  # Direct channel ID links
+                'a[href*="/@"]',         # Handle-based links
+                'a[href*="/c/"]',        # Custom channel links
+                'a[href*="/user/"]',     # User-based links
             ]
             
-            for selector in channel_selectors:
+            for selector in channel_link_selectors:
                 channel_elem = container.select_one(selector)
                 if channel_elem:
-                    channel_text = channel_elem.get_text(strip=True)
-                    if channel_text and len(channel_text) > 1:
-                        channel_name = channel_text
+                    href = channel_elem.get('href', '')
+                    if href:
+                        # Construct full URL
+                        if href.startswith('/'):
+                            channel_url = f"https://www.youtube.com{href}"
+                        elif 'youtube.com' in href:
+                            channel_url = href
+                        
+                        # Extract channel ID or handle
+                        import re
+                        if '/channel/' in href:
+                            match = re.search(r'/channel/([^/?&]+)', href)
+                            if match:
+                                channel_id = match.group(1)
+                        elif '/@' in href:
+                            match = re.search(r'/@([^/?&]+)', href)
+                            if match:
+                                channel_id = f"@{match.group(1)}"
+                        elif '/c/' in href:
+                            match = re.search(r'/c/([^/?&]+)', href)
+                            if match:
+                                channel_id = match.group(1)
+                        elif '/user/' in href:
+                            match = re.search(r'/user/([^/?&]+)', href)
+                            if match:
+                                channel_id = match.group(1)
+                        
+                        # Get channel name from the link text
+                        channel_text = channel_elem.get_text(strip=True)
+                        if channel_text and len(channel_text) > 1:
+                            channel_name = channel_text
                         break
+            
+            # Fallback: look for channel name in other selectors if not found
+            if channel_name == "Unknown":
+                channel_name_selectors = self.selectors['channel'] + [
+                    '.ytd-channel-name',
+                    '[data-testid*="channel"]',
+                    'span[class*="channel"]',
+                ]
+                
+                for selector in channel_name_selectors:
+                    channel_elem = container.select_one(selector)
+                    if channel_elem:
+                        channel_text = channel_elem.get_text(strip=True)
+                        if channel_text and len(channel_text) > 1:
+                            channel_name = channel_text
+                            break
             
             # Extract view count (optional)
             view_count = "Unknown"
@@ -785,7 +832,9 @@ class Crawl4AIYouTubeAgent:
                 view_count=view_count,
                 duration=duration,
                 upload_date=upload_date,
-                video_id=video_id
+                video_id=video_id,
+                channel_url=channel_url,
+                channel_id=channel_id
             )
             
             logger.debug(f"✅ Extracted video: {title[:50]}... from {channel_name}")
