@@ -233,12 +233,19 @@ class MasterDiscoveryAgent:
         try:
             logger.info(f"🔍 Searching YouTube for: '{search_query}' (batch {offset + 1})")
             
-            # Use Crawl4AI YouTube agent with daily filter for fresh content
-            result = await self.youtube_agent.search_videos(
-                query=search_query,
-                max_results=batch_size,
-                upload_date="day"  # Daily fresh content for scheduled runs
-            )
+            # Use Crawl4AI YouTube agent with daily filter for fresh content with timeout
+            try:
+                result = await asyncio.wait_for(
+                    self.youtube_agent.search_videos(
+                        query=search_query,
+                        max_results=batch_size,
+                        upload_date="day"  # Daily fresh content for scheduled runs
+                    ),
+                    timeout=60.0  # 60 second timeout for entire search operation
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"⏰ YouTube search timed out for '{search_query}' (batch {offset + 1})")
+                return []
             
             # Extract videos from the result object
             if result.success and result.videos:

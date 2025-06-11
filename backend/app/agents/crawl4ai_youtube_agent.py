@@ -206,11 +206,11 @@ class Crawl4AIYouTubeAgent:
         success = False
         error_message = None
         
-        # Multiple search strategies (ordered by scrolling capability for discovery)
+        # Multiple search strategies (ordered by speed and reliability)
         search_strategies = [
-            self._search_with_extended_stealth,  # Start with best scrolling
-            self._search_with_magic_mode,        # Backup scrolling
-            self._search_with_basic_config,      # Fallback no-scroll
+            self._search_with_basic_config,      # Fastest - start here
+            self._search_with_magic_mode,        # Second fastest with scrolling
+            self._search_with_extended_stealth,  # Slower but more comprehensive
             self._search_with_mobile_emulation   # Last resort
         ]
         
@@ -229,8 +229,8 @@ class Crawl4AIYouTubeAgent:
                 logger.error(f"Strategy {strategy_index + 1} exception: {str(e)}")
                 error_message = str(e)
                 
-            # Random delay between strategies
-            await asyncio.sleep(random.uniform(3.0, 8.0))
+            # Quick delay between strategies (reduced since methods are faster)
+            await asyncio.sleep(random.uniform(1.0, 3.0))
         
         return YouTubeSearchResult(
             query=query,
@@ -255,26 +255,31 @@ class Crawl4AIYouTubeAgent:
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
                 wait_until="domcontentloaded",
-                page_timeout=30000,
+                page_timeout=15000,  # Reduced from 30s
                 delay_before_return_html=2.0,
                 verbose=True
             )
             
             search_url = self._build_search_url(query, upload_date)
+            logger.info(f"🔍 Basic config search URL: {search_url}")
             
             async with AsyncWebCrawler(config=browser_config) as crawler:
-                await asyncio.sleep(random.uniform(1.0, 3.0))
+                await asyncio.sleep(random.uniform(0.5, 1.5))  # Faster
                 
+                logger.info("🌐 Starting basic config crawl...")
                 result = await crawler.arun(url=search_url, config=crawler_config)
                 
                 if not result.success:
+                    logger.error(f"❌ Basic config crawl failed: {result.error_message}")
                     return YouTubeSearchResult(
                         query=query, videos=[], total_results=0,
                         success=False, error_message=f"Basic config crawl failed: {result.error_message}"
                     )
                 
+                logger.info("🎬 Extracting videos from HTML...")
                 videos = await self._extract_videos_from_html(result.html, max_results)
                 
+                logger.info(f"✅ Basic config found {len(videos)} videos")
                 return YouTubeSearchResult(
                     query=query,
                     videos=videos,
@@ -283,190 +288,176 @@ class Crawl4AIYouTubeAgent:
                     error_message=None if videos else "No videos extracted from basic config"
                 )
                 
+        except asyncio.TimeoutError:
+            logger.error("⏰ Basic config timed out")
+            return YouTubeSearchResult(
+                query=query, videos=[], total_results=0,
+                success=False, error_message="Basic config search timed out"
+            )
         except Exception as e:
+            logger.error(f"💥 Basic config exception: {str(e)}")
             return YouTubeSearchResult(
                 query=query, videos=[], total_results=0,
                 success=False, error_message=f"Basic config exception: {str(e)}"
             )
 
     async def _search_with_magic_mode(self, query: str, max_results: int, upload_date: str) -> YouTubeSearchResult:
-        """Search using magic mode with full automation and scrolling."""
-        browser_config = await self.get_browser_config()
-        crawler_config = await self.get_crawler_config()
-        
-        # Ensure magic mode is enabled
-        crawler_config.magic = True
-        
-        # Add JavaScript to scroll and load more videos
-        scroll_and_extract_js = """
-        (function() {
-            console.log('Starting scroll and extraction...');
+        """Search using magic mode with full automation and scrolling - FAST VERSION."""
+        try:
+            browser_config = await self.get_browser_config()
+            crawler_config = await self.get_crawler_config()
             
-            // Function to scroll page and wait for content to load
-            async function scrollAndWait() {
-                return new Promise((resolve) => {
-                    let scrollCount = 0;
-                    const maxScrolls = 5;
-                    const scrollInterval = 2000; // 2 seconds between scrolls
-                    
-                    function performScroll() {
-                        if (scrollCount < maxScrolls) {
-                            console.log(`Scroll ${scrollCount + 1}/${maxScrolls}`);
-                            
-                            // Scroll to bottom
-                            window.scrollTo(0, document.body.scrollHeight);
-                            
-                            scrollCount++;
-                            setTimeout(performScroll, scrollInterval);
-                        } else {
-                            console.log('Scrolling complete, waiting for final load...');
-                            setTimeout(resolve, 3000); // Wait 3 seconds after final scroll
-                        }
+            # Ensure magic mode is enabled
+            crawler_config.magic = True
+            
+            # Fast scrolling JavaScript
+            fast_scroll_js = """
+            (function() {
+                console.log('Magic mode - starting fast scroll...');
+                
+                let scrollCount = 0;
+                const maxScrolls = 2; // Even faster for magic mode
+                
+                function quickScroll() {
+                    if (scrollCount < maxScrolls) {
+                        console.log(`Magic scroll ${scrollCount + 1}/${maxScrolls}`);
+                        window.scrollBy(0, 600);
+                        scrollCount++;
+                        setTimeout(quickScroll, 600); // 0.6s delays
+                    } else {
+                        console.log('Magic scrolling complete');
                     }
-                    
-                    performScroll();
-                });
-            }
+                }
+                
+                quickScroll();
+            })();
+            """
             
-            // Start scrolling process
-            scrollAndWait().then(() => {
-                console.log('Scroll and extraction complete');
-            });
-        })();
-        """
-        
-        crawler_config.js_code = scroll_and_extract_js
-        crawler_config.delay_before_return_html = 15.0  # Extended delay for scrolling
-        
-        search_url = self._build_search_url(query, upload_date)
-        
-        async with AsyncWebCrawler(config=browser_config) as crawler:
-            # Add random pre-search delay
-            await asyncio.sleep(random.uniform(1.0, 3.0))
+            crawler_config.js_code = fast_scroll_js
+            crawler_config.delay_before_return_html = 5.0  # Much faster
+            crawler_config.page_timeout = 15000  # 15 second timeout
             
-            result = await crawler.arun(url=search_url, config=crawler_config)
+            search_url = self._build_search_url(query, upload_date)
+            logger.info(f"🔍 Magic mode search URL: {search_url}")
             
-            if not result.success:
+            async with AsyncWebCrawler(config=browser_config) as crawler:
+                # Add random pre-search delay
+                await asyncio.sleep(random.uniform(0.5, 1.5))  # Faster
+                
+                logger.info("🌐 Starting magic mode crawl...")
+                result = await crawler.arun(url=search_url, config=crawler_config)
+                
+                if not result.success:
+                    logger.error(f"❌ Magic mode crawl failed: {result.error_message}")
+                    return YouTubeSearchResult(
+                        query=query, videos=[], total_results=0, 
+                        success=False, error_message=f"Magic mode crawl failed: {result.error_message}"
+                    )
+                
+                logger.info("🎬 Extracting videos from HTML...")
+                videos = await self._extract_videos_from_html(result.html, max_results)
+                
+                logger.info(f"✅ Magic mode found {len(videos)} videos")
                 return YouTubeSearchResult(
-                    query=query, videos=[], total_results=0, 
-                    success=False, error_message=f"Magic mode crawl failed: {result.error_message}"
+                    query=query,
+                    videos=videos,
+                    total_results=len(videos),
+                    success=len(videos) > 0,
+                    error_message=None if videos else "No videos extracted from magic mode"
                 )
-            
-            videos = await self._extract_videos_from_html(result.html, max_results)
-            
+                
+        except asyncio.TimeoutError:
+            logger.error("⏰ Magic mode timed out")
             return YouTubeSearchResult(
-                query=query,
-                videos=videos,
-                total_results=len(videos),
-                success=len(videos) > 0,
-                error_message=None if videos else "No videos extracted from magic mode"
+                query=query, videos=[], total_results=0,
+                success=False, error_message="Magic mode search timed out"
+            )
+        except Exception as e:
+            logger.error(f"💥 Magic mode exception: {str(e)}")
+            return YouTubeSearchResult(
+                query=query, videos=[], total_results=0,
+                success=False, error_message=f"Magic mode exception: {str(e)}"
             )
 
     async def _search_with_extended_stealth(self, query: str, max_results: int, upload_date: str) -> YouTubeSearchResult:
-        """Search with extended stealth features and interaction simulation."""
-        browser_config = await self.get_browser_config()
-        crawler_config = await self.get_crawler_config()
-        
-        # Enhanced stealth settings
-        crawler_config.simulate_user = True
-        crawler_config.override_navigator = True
-        crawler_config.magic = True
-        crawler_config.scan_full_page = True
-        
-        # Enhanced JavaScript for human-like behavior and aggressive scrolling
-        human_behavior_js = """
-        (function() {
-            console.log('Starting enhanced human behavior simulation...');
+        """Search with extended stealth features and interaction simulation - FAST VERSION."""
+        try:
+            browser_config = await self.get_browser_config()
+            crawler_config = await self.get_crawler_config()
             
-            // Simulate human-like behavior
-            var delay = function(ms) { 
-                return new Promise(function(resolve) { 
-                    setTimeout(resolve, ms); 
-                }); 
-            };
+            # Enhanced stealth settings but faster
+            crawler_config.simulate_user = True
+            crawler_config.override_navigator = True
+            crawler_config.magic = True
+            crawler_config.scan_full_page = True
             
-            // Random mouse movements
-            var simulateMouseMovement = function() {
-                for (let i = 0; i < 3; i++) {
-                    setTimeout(() => {
-                        var event = new MouseEvent('mousemove', {
-                            clientX: Math.random() * window.innerWidth,
-                            clientY: Math.random() * window.innerHeight
-                        });
-                        document.dispatchEvent(event);
-                    }, i * 500);
+            # Simplified, faster JavaScript for scrolling
+            fast_scroll_js = """
+            (function() {
+                console.log('Starting fast scroll...');
+                
+                let scrollCount = 0;
+                const maxScrolls = 3; // Reduced from 8
+                
+                function fastScroll() {
+                    if (scrollCount < maxScrolls) {
+                        console.log(`Fast scroll ${scrollCount + 1}/${maxScrolls}`);
+                        window.scrollBy(0, 800);
+                        scrollCount++;
+                        setTimeout(fastScroll, 800); // Much faster - 0.8s instead of 1.5-3.5s
+                    } else {
+                        console.log('Fast scrolling complete');
+                    }
                 }
-            };
+                
+                // Start immediately
+                fastScroll();
+            })();
+            """
             
-            // Enhanced scroll behavior to load more videos
-            var simulateEnhancedScroll = function() {
-                return new Promise(function(resolve) {
-                    let scrollAttempts = 0;
-                    const maxScrollAttempts = 8; // More scrolls for more videos
-                    
-                    var performScroll = function() {
-                        if (scrollAttempts < maxScrollAttempts) {
-                            console.log(`Enhanced scroll ${scrollAttempts + 1}/${maxScrollAttempts}`);
-                            
-                            // Scroll in increments to simulate human behavior
-                            const scrollHeight = document.body.scrollHeight;
-                            const currentScroll = window.pageYOffset;
-                            const scrollAmount = Math.min(500 + Math.random() * 300, scrollHeight - currentScroll);
-                            
-                            window.scrollBy(0, scrollAmount);
-                            
-                            // Simulate pause as human would do
-                            setTimeout(() => {
-                                scrollAttempts++;
-                                performScroll();
-                            }, Math.random() * 2000 + 1500); // 1.5-3.5 second delays
-                        } else {
-                            console.log('Enhanced scrolling complete, final wait...');
-                            setTimeout(resolve, 4000); // Wait 4 seconds after final scroll
-                        }
-                    };
-                    
-                    performScroll();
-                });
-            };
+            crawler_config.js_code = fast_scroll_js
+            crawler_config.delay_before_return_html = 8.0  # Reduced from 25 seconds
+            crawler_config.page_timeout = 20000  # 20 second timeout instead of default
             
-            // Execute enhanced human simulation
-            delay(Math.random() * 2000 + 1000).then(function() {
-                simulateMouseMovement();
-                return delay(Math.random() * 1000 + 500);
-            }).then(function() {
-                return simulateEnhancedScroll();
-            }).then(function() {
-                console.log('All human behavior simulation complete');
-                return delay(Math.random() * 2000 + 1000);
-            });
-        })();
-        """
-        
-        crawler_config.js_code = human_behavior_js
-        crawler_config.delay_before_return_html = 25.0  # Extended delay for enhanced scrolling
-        
-        search_url = self._build_search_url(query, upload_date)
-        
-        async with AsyncWebCrawler(config=browser_config) as crawler:
-            await asyncio.sleep(random.uniform(2.0, 4.0))
+            search_url = self._build_search_url(query, upload_date)
+            logger.info(f"🔍 Extended stealth search URL: {search_url}")
             
-            result = await crawler.arun(url=search_url, config=crawler_config)
-            
-            if not result.success:
+            async with AsyncWebCrawler(config=browser_config) as crawler:
+                await asyncio.sleep(random.uniform(1.0, 2.0))  # Reduced delay
+                
+                logger.info("🌐 Starting extended stealth crawl...")
+                result = await crawler.arun(url=search_url, config=crawler_config)
+                
+                if not result.success:
+                    logger.error(f"❌ Extended stealth crawl failed: {result.error_message}")
+                    return YouTubeSearchResult(
+                        query=query, videos=[], total_results=0,
+                        success=False, error_message=f"Extended stealth crawl failed: {result.error_message}"
+                    )
+                
+                logger.info("🎬 Extracting videos from HTML...")
+                videos = await self._extract_videos_from_html(result.html, max_results)
+                
+                logger.info(f"✅ Extended stealth found {len(videos)} videos")
                 return YouTubeSearchResult(
-                    query=query, videos=[], total_results=0,
-                    success=False, error_message=f"Extended stealth crawl failed: {result.error_message}"
+                    query=query,
+                    videos=videos,
+                    total_results=len(videos),
+                    success=len(videos) > 0,
+                    error_message=None if videos else "No videos extracted from extended stealth"
                 )
-            
-            videos = await self._extract_videos_from_html(result.html, max_results)
-            
+                
+        except asyncio.TimeoutError:
+            logger.error("⏰ Extended stealth timed out")
             return YouTubeSearchResult(
-                query=query,
-                videos=videos,
-                total_results=len(videos),
-                success=len(videos) > 0,
-                error_message=None if videos else "No videos extracted from extended stealth"
+                query=query, videos=[], total_results=0,
+                success=False, error_message="Extended stealth search timed out"
+            )
+        except Exception as e:
+            logger.error(f"💥 Extended stealth exception: {str(e)}")
+            return YouTubeSearchResult(
+                query=query, videos=[], total_results=0,
+                success=False, error_message=f"Extended stealth exception: {str(e)}"
             )
 
     async def _search_with_mobile_emulation(self, query: str, max_results: int, upload_date: str) -> YouTubeSearchResult:
