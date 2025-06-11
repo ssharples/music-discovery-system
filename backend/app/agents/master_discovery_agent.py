@@ -24,6 +24,7 @@ import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 from uuid import uuid4
+import urllib.parse
 
 from app.agents.crawl4ai_youtube_agent import Crawl4AIYouTubeAgent
 from app.agents.crawl4ai_enrichment_agent import Crawl4AIEnrichmentAgent
@@ -634,90 +635,175 @@ class MasterDiscoveryAgent:
     
     def _extract_social_links_from_description(self, description: str) -> Dict[str, str]:
         """
-        Extract social media links from video description with comprehensive patterns.
+        Extract social media links from video description.
+        Now handles YouTube redirect URLs which wrap the actual social media links.
+        
+        Example redirect URL:
+        https://www.youtube.com/redirect?event=video_description&redir_token=...&q=https%3A%2F%2Fwww.instagram.com%2Franirastacitimusic&v=...
         """
         if not description:
             return {}
         
-        links = {}
+        social_links = {}
         
-        # Instagram - multiple patterns
-        instagram_patterns = [
-            r'(?:https?://)?(?:www\.)?instagram\.com/([a-zA-Z0-9_.]+)/?',
-            r'@([a-zA-Z0-9_.]+)(?:\s|$)',  # @username format (if clearly Instagram context)
-            r'IG:?\s*@?([a-zA-Z0-9_.]+)',   # IG: @username
-            r'Instagram:?\s*@?([a-zA-Z0-9_.]+)',  # Instagram: @username
-        ]
+        # First, extract URLs from YouTube redirect links
+        redirect_pattern = r'https://www\.youtube\.com/redirect\?[^"\s<>]*?&q=([^&"\s<>]+)'
+        redirect_matches = re.findall(redirect_pattern, description, re.IGNORECASE)
         
-        for pattern in instagram_patterns:
-            match = re.search(pattern, description, re.IGNORECASE)
-            if match and 'instagram' not in links:
-                username = match.group(1)
-                if len(username) > 1 and not username.startswith('_'):  # Basic validation
-                    links['instagram'] = f"https://instagram.com/{username}"
-                    break
+        # Decode the URLs from redirect parameters
+        decoded_urls = []
+        for encoded_url in redirect_matches:
+            try:
+                decoded_url = urllib.parse.unquote(encoded_url)
+                decoded_urls.append(decoded_url)
+                logger.debug(f"🔗 Decoded YouTube redirect: {encoded_url} -> {decoded_url}")
+            except Exception as e:
+                logger.debug(f"⚠️ Failed to decode redirect URL: {encoded_url}, error: {e}")
+                continue
         
-        # TikTok - multiple patterns
-        tiktok_patterns = [
-            r'(?:https?://)?(?:www\.)?tiktok\.com/@([a-zA-Z0-9_.]+)/?',
-            r'TikTok:?\s*@?([a-zA-Z0-9_.]+)',
-            r'TT:?\s*@?([a-zA-Z0-9_.]+)',
-        ]
+        # Also look for direct URLs in the description
+        # Common URL pattern
+        url_pattern = r'https?://[^\s<>"]+|www\.[^\s<>"]+'
+        direct_matches = re.findall(url_pattern, description, re.IGNORECASE)
         
-        for pattern in tiktok_patterns:
-            match = re.search(pattern, description, re.IGNORECASE)
-            if match and 'tiktok' not in links:
-                username = match.group(1)
-                if len(username) > 1:
-                    links['tiktok'] = f"https://tiktok.com/@{username}"
-                    break
+        # Combine decoded redirect URLs and direct URLs
+        all_urls = decoded_urls + direct_matches
+        logger.debug(f"🔍 Found {len(all_urls)} total URLs: {len(decoded_urls)} from redirects, {len(direct_matches)} direct")
         
-        # Spotify - multiple patterns
-        spotify_patterns = [
-            r'(?:https?://)?open\.spotify\.com/artist/([a-zA-Z0-9]+)',
-            r'spotify\.com/artist/([a-zA-Z0-9]+)',
-            r'Spotify:?\s*(?:https?://)?(?:open\.)?spotify\.com/artist/([a-zA-Z0-9]+)',
-        ]
+        # Enhanced patterns for social media platforms
+        platform_patterns = {
+            'instagram': [
+                r'(?:https?://)?(?:www\.)?instagram\.com/([a-zA-Z0-9._]+)',
+                r'(?:https?://)?(?:www\.)?ig\.me/([a-zA-Z0-9._]+)',
+                r'@([a-zA-Z0-9._]+)(?:\s|$)'  # Handle @username mentions
+            ],
+            'tiktok': [
+                r'(?:https?://)?(?:www\.)?tiktok\.com/@([a-zA-Z0-9._]+)',
+                r'(?:https?://)?(?:vm\.)?tiktok\.com/([a-zA-Z0-9._]+)',
+                r'(?:https?://)?(?:www\.)?tiktok\.com/t/([a-zA-Z0-9._]+)'
+            ],
+            'spotify': [
+                r'(?:https?://)?(?:open\.)?spotify\.com/artist/([a-zA-Z0-9]+)',
+                r'(?:https?://)?(?:open\.)?spotify\.com/user/([a-zA-Z0-9._]+)',
+                r'(?:https?://)?(?:open\.)?spotify\.com/playlist/([a-zA-Z0-9]+)'
+            ],
+            'twitter': [
+                r'(?:https?://)?(?:www\.)?twitter\.com/([a-zA-Z0-9_]+)',
+                r'(?:https?://)?(?:www\.)?x\.com/([a-zA-Z0-9_]+)'
+            ],
+            'facebook': [
+                r'(?:https?://)?(?:www\.)?facebook\.com/([a-zA-Z0-9.]+)',
+                r'(?:https?://)?(?:www\.)?fb\.com/([a-zA-Z0-9.]+)'
+            ],
+            'youtube': [
+                r'(?:https?://)?(?:www\.)?youtube\.com/channel/([a-zA-Z0-9_-]+)',
+                r'(?:https?://)?(?:www\.)?youtube\.com/c/([a-zA-Z0-9_-]+)',
+                r'(?:https?://)?(?:www\.)?youtube\.com/@([a-zA-Z0-9_.-]+)',
+                r'(?:https?://)?(?:www\.)?youtu\.be/([a-zA-Z0-9_-]+)'
+            ],
+            'website': [
+                r'(?:https?://)?(?:www\.)?([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})(?:/[^\s]*)?'
+            ]
+        }
         
-        for pattern in spotify_patterns:
-            match = re.search(pattern, description, re.IGNORECASE)
-            if match and 'spotify' not in links:
-                artist_id = match.group(1)
-                if len(artist_id) == 22:  # Spotify artist ID length
-                    links['spotify'] = f"https://open.spotify.com/artist/{artist_id}"
-                    break
+        # Extract links for each platform
+        for platform, patterns in platform_patterns.items():
+            for pattern in patterns:
+                # Check all URLs (both decoded redirects and direct)
+                for url in all_urls:
+                    matches = re.findall(pattern, url, re.IGNORECASE)
+                    if matches:
+                        # Take the first match and clean it
+                        username_or_id = matches[0]
+                        
+                        # Construct the full URL
+                        if platform == 'instagram':
+                            if not username_or_id.startswith('@'):
+                                full_url = f"https://www.instagram.com/{username_or_id}"
+                            else:
+                                full_url = f"https://www.instagram.com/{username_or_id[1:]}"
+                        elif platform == 'tiktok':
+                            if not username_or_id.startswith('@'):
+                                full_url = f"https://www.tiktok.com/@{username_or_id}"
+                            else:
+                                full_url = f"https://www.tiktok.com/{username_or_id}"
+                        elif platform == 'spotify':
+                            full_url = f"https://open.spotify.com/artist/{username_or_id}"
+                        elif platform == 'twitter':
+                            full_url = f"https://twitter.com/{username_or_id}"
+                        elif platform == 'facebook':
+                            full_url = f"https://www.facebook.com/{username_or_id}"
+                        elif platform == 'youtube':
+                            if 'channel/' in url:
+                                full_url = f"https://www.youtube.com/channel/{username_or_id}"
+                            elif '@' in url:
+                                full_url = f"https://www.youtube.com/@{username_or_id}"
+                            else:
+                                full_url = f"https://www.youtube.com/c/{username_or_id}"
+                        elif platform == 'website':
+                            full_url = url if url.startswith('http') else f"https://{url}"
+                        else:
+                            full_url = url
+                        
+                        # Only add if we don't already have this platform or if this is a better match
+                        if platform not in social_links or len(full_url) > len(social_links[platform]):
+                            social_links[platform] = full_url
+                            logger.debug(f"✅ Found {platform}: {full_url}")
+                            break  # Found a match for this platform, move to next platform
+                
+                # Also search in the raw description text for @mentions and direct patterns
+                description_matches = re.findall(pattern, description, re.IGNORECASE)
+                if description_matches and platform not in social_links:
+                    username_or_id = description_matches[0]
+                    if platform == 'instagram' and not username_or_id.startswith('@'):
+                        full_url = f"https://www.instagram.com/{username_or_id}"
+                        social_links[platform] = full_url
+                        logger.debug(f"✅ Found {platform} from description: {full_url}")
         
-        # Twitter/X - multiple patterns
-        twitter_patterns = [
-            r'(?:https?://)?(?:www\.)?(?:twitter\.com|x\.com)/([a-zA-Z0-9_]+)/?',
-            r'Twitter:?\s*@?([a-zA-Z0-9_]+)',
-            r'X:?\s*@?([a-zA-Z0-9_]+)',
-        ]
+        # Filter out invalid/generic links
+        filtered_links = {}
+        for platform, url in social_links.items():
+            if self._is_valid_social_link(platform, url):
+                filtered_links[platform] = url
+            else:
+                logger.debug(f"⚠️ Filtered out invalid {platform} link: {url}")
         
-        for pattern in twitter_patterns:
-            match = re.search(pattern, description, re.IGNORECASE)
-            if match and 'twitter' not in links:
-                username = match.group(1)
-                if len(username) > 1:
-                    links['twitter'] = f"https://twitter.com/{username}"
-                    break
+        logger.debug(f"🔗 Extracted {len(filtered_links)} valid social links: {list(filtered_links.keys())}")
+        return filtered_links
+    
+    def _is_valid_social_link(self, platform: str, url: str) -> bool:
+        """
+        Validate that a social media link is legitimate and not generic/invalid.
+        """
+        if not url or len(url) < 10:
+            return False
         
-        # Facebook
-        facebook_patterns = [
-            r'(?:https?://)?(?:www\.)?facebook\.com/([a-zA-Z0-9_.]+)/?',
-            r'Facebook:?\s*(?:https?://)?(?:www\.)?facebook\.com/([a-zA-Z0-9_.]+)/?',
-        ]
+        # Platform-specific validation
+        if platform == 'instagram':
+            # Must have a username that's not too generic
+            username_match = re.search(r'instagram\.com/([a-zA-Z0-9._]+)', url)
+            if username_match:
+                username = username_match.group(1)
+                # Filter out generic/invalid usernames
+                invalid_usernames = ['home', 'explore', 'accounts', 'about', 'privacy', 'terms', 'help']
+                return username not in invalid_usernames and len(username) >= 2
         
-        for pattern in facebook_patterns:
-            match = re.search(pattern, description, re.IGNORECASE)
-            if match and 'facebook' not in links:
-                page_name = match.group(1)
-                if len(page_name) > 1:
-                    links['facebook'] = f"https://facebook.com/{page_name}"
-                    break
+        elif platform == 'tiktok':
+            # Must have a valid username format
+            username_match = re.search(r'tiktok\.com/@([a-zA-Z0-9._]+)', url)
+            if username_match:
+                username = username_match.group(1)
+                return len(username) >= 2
         
-        logger.debug(f"Extracted social links from description: {links}")
-        return links
+        elif platform == 'spotify':
+            # Must have a valid artist/user ID
+            return 'spotify.com/' in url and len(url) > 30
+        
+        elif platform == 'website':
+            # Basic domain validation
+            return '.' in url and not any(exclude in url.lower() for exclude in ['youtube.com', 'instagram.com', 'tiktok.com', 'spotify.com'])
+        
+        return True
     
     async def _extract_and_clean_artist_name(self, title: str) -> Optional[str]:
         """
