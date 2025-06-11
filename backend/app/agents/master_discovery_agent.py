@@ -564,10 +564,11 @@ class MasterDiscoveryAgent:
         score = 0
         
         try:
-            # Extract metrics from enriched data
-            spotify_listeners = getattr(enriched_data, 'spotify_monthly_listeners', 0) or 0
-            instagram_followers = getattr(enriched_data, 'instagram_followers', 0) or 0
-            tiktok_followers = getattr(enriched_data, 'tiktok_followers', 0) or 0
+            # Extract metrics from enriched data - fix the data access pattern
+            spotify_listeners = enriched_data.profile.follower_counts.get('spotify_monthly_listeners', 0) or 0
+            instagram_followers = enriched_data.profile.follower_counts.get('instagram', 0) or 0
+            tiktok_followers = enriched_data.profile.follower_counts.get('tiktok', 0) or 0
+            tiktok_likes = enriched_data.profile.metadata.get('tiktok_likes', 0) or 0
             youtube_subscribers = youtube_data.get('subscriber_count', 0)
             
             # YouTube metrics (30 points max)
@@ -621,9 +622,9 @@ class MasterDiscoveryAgent:
             score -= artificial_inflation_penalty
             
             # Content quality bonus (10 points max)
-            if hasattr(enriched_data, 'lyrics_themes') and enriched_data.lyrics_themes:
+            if enriched_data.profile.metadata.get('lyrics_themes'):
                 score += 5
-            if hasattr(enriched_data, 'top_tracks') and enriched_data.top_tracks:
+            if enriched_data.profile.metadata.get('top_tracks'):
                 score += 5
             
             return max(0, min(score, 100))  # Clamp between 0 and 100
@@ -708,13 +709,13 @@ class MasterDiscoveryAgent:
                 'youtube_channel_url': youtube_data.get('channel_url', ''),
                 'spotify_id': artist_profile.spotify_id,
                 'spotify_url': artist_profile.social_links.get('spotify'),
-                'spotify_monthly_listeners': getattr(enriched_data, 'spotify_monthly_listeners', 0) or 0,
+                'spotify_monthly_listeners': enriched_data.profile.follower_counts.get('spotify_monthly_listeners', 0) or 0,
                 'instagram_url': artist_profile.social_links.get('instagram'),
-                'instagram_follower_count': getattr(enriched_data, 'instagram_followers', 0) or 0,
+                'instagram_follower_count': enriched_data.profile.follower_counts.get('instagram', 0) or 0,
                 'tiktok_url': artist_profile.social_links.get('tiktok'),
-                'tiktok_follower_count': getattr(enriched_data, 'tiktok_followers', 0) or 0,
-                'tiktok_likes_count': getattr(enriched_data, 'tiktok_likes', 0) or 0,
-                'music_theme_analysis': getattr(enriched_data, 'lyrics_themes', ''),
+                'tiktok_follower_count': enriched_data.profile.follower_counts.get('tiktok', 0) or 0,
+                'tiktok_likes_count': enriched_data.profile.metadata.get('tiktok_likes', 0) or 0,
+                'music_theme_analysis': enriched_data.profile.metadata.get('lyrics_themes', ''),
                 'discovery_source': 'youtube',
                 'discovery_video_id': artist_profile.metadata.get('discovery_video', {}).get('video_id'),
                 'discovery_video_title': artist_profile.metadata.get('discovery_video', {}).get('title'),
@@ -807,4 +808,4 @@ class MasterDiscoveryAgent:
                         return True
         
         return False
-    
+ 
