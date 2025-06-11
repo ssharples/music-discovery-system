@@ -61,6 +61,21 @@ CREATE TABLE IF NOT EXISTS artist (
     )
 );
 
+-- Create discovery sessions table
+CREATE TABLE IF NOT EXISTS discovery_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    search_query VARCHAR(500) NOT NULL,
+    max_results INTEGER DEFAULT 50,
+    filters JSONB DEFAULT '{}'::jsonb,
+    status VARCHAR(50) DEFAULT 'started',
+    results JSONB DEFAULT '{}'::jsonb,
+    started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    completed_at TIMESTAMP WITH TIME ZONE,
+    error_message TEXT,
+    artists_found INTEGER DEFAULT 0,
+    execution_time_ms INTEGER DEFAULT 0
+);
+
 -- Add indexes for performance
 CREATE INDEX IF NOT EXISTS idx_artist_name ON artist(name);
 CREATE INDEX IF NOT EXISTS idx_artist_spotify_id ON artist(spotify_id);
@@ -68,6 +83,10 @@ CREATE INDEX IF NOT EXISTS idx_artist_youtube_channel_id ON artist(youtube_chann
 CREATE INDEX IF NOT EXISTS idx_artist_discovery_score ON artist(discovery_score DESC);
 CREATE INDEX IF NOT EXISTS idx_artist_last_crawled ON artist(last_crawled_at DESC);
 CREATE INDEX IF NOT EXISTS idx_artist_is_validated ON artist(is_validated);
+
+-- Discovery sessions indexes
+CREATE INDEX IF NOT EXISTS idx_discovery_sessions_started_at ON discovery_sessions(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_discovery_sessions_status ON discovery_sessions(status);
 
 -- Create a table for Spotify top tracks
 CREATE TABLE IF NOT EXISTS artist_spotify_tracks (
@@ -115,6 +134,7 @@ CREATE INDEX IF NOT EXISTS idx_discovery_log_created_at ON artist_discovery_log(
 
 -- Add table comments
 COMMENT ON TABLE artist IS 'Enhanced artist table with comprehensive social media and streaming platform data';
+COMMENT ON TABLE discovery_sessions IS 'Discovery session tracking with results and metadata';
 COMMENT ON TABLE artist_spotify_tracks IS 'Top tracks for each artist from Spotify';
 COMMENT ON TABLE artist_lyrics_analysis IS 'Sentiment and theme analysis of artist lyrics';
 COMMENT ON TABLE artist_discovery_log IS 'Audit trail of the discovery process for each artist';

@@ -73,26 +73,17 @@ class MasterDiscoveryAgent:
         logger.info(f"🎵 Starting master discovery workflow (max_results: {max_results})")
         
         try:
-            # Phase 1: YouTube Video Discovery
-            logger.info("📺 Phase 1: YouTube video discovery")
-            youtube_videos = await self._search_youtube_videos(search_query)
-            
-            if not youtube_videos:
-                return self._create_empty_result("No YouTube videos found", start_time)
-            
-            logger.info(f"Found {len(youtube_videos)} YouTube videos")
-            
-            # Phase 2: Video Processing and Filtering
-            logger.info("🔍 Phase 2: Video processing and filtering")
-            processed_videos = await self._process_and_filter_videos(deps, youtube_videos)
+            # Phase 1: YouTube Video Discovery with Scrolling
+            logger.info("📺 Phase 1: YouTube video discovery with scrolling")
+            processed_videos = await self._search_and_filter_videos_with_scrolling(deps, search_query)
             
             if not processed_videos:
-                return self._create_empty_result("No videos passed filtering", start_time)
+                return self._create_empty_result("No videos found that passed filtering", start_time)
             
-            logger.info(f"Processed {len(processed_videos)} videos that passed filtering")
+            logger.info(f"✅ Found {len(processed_videos)} videos that passed all filters")
             
-            # Phase 3: Artist Processing Pipeline
-            logger.info("🎤 Phase 3: Artist processing pipeline")
+            # Phase 2: Artist Processing Pipeline
+            logger.info("🎤 Phase 2: Artist processing pipeline")
             discovered_artists = []
             total_processed = 0
             
@@ -117,7 +108,7 @@ class MasterDiscoveryAgent:
                     logger.error(f"❌ Error processing artist {i}: {e}")
                     continue
             
-            # Phase 4: Final Results
+            # Phase 3: Final Results
             execution_time = time.time() - start_time
             logger.info(f"🎉 Discovery complete! Found {len(discovered_artists)} artists in {execution_time:.2f}s")
             
@@ -130,7 +121,6 @@ class MasterDiscoveryAgent:
                     'total_found': len(discovered_artists),
                     'execution_time': execution_time,
                     'discovery_metadata': {
-                        'youtube_videos_found': len(youtube_videos),
                         'videos_after_filtering': len(processed_videos),
                         'success_rate': len(discovered_artists) / total_processed if total_processed > 0 else 0,
                         'average_score': sum(a.get('discovery_score', 0) for a in discovered_artists) / len(discovered_artists) if discovered_artists else 0
@@ -152,18 +142,102 @@ class MasterDiscoveryAgent:
                 }
             }
     
-    async def _search_youtube_videos(self, search_query: str) -> List[Dict[str, Any]]:
+    async def _search_and_filter_videos_with_scrolling(
+        self,
+        deps: PipelineDependencies,
+        search_query: str,
+        target_filtered_videos: int = 100
+    ) -> List[Dict[str, Any]]:
         """
-        Search YouTube for videos using the Crawl4AI agent with comprehensive filters.
+        Search YouTube with scrolling until we have enough videos that pass filters.
+        
+        Args:
+            deps: Pipeline dependencies
+            search_query: YouTube search query
+            target_filtered_videos: Minimum number of videos that must pass filters
+            
+        Returns:
+            List of processed videos that passed all filters
+        """
+        processed_videos = []
+        total_attempts = 0
+        max_attempts = 10  # Prevent infinite loops
+        videos_per_search = 50  # Number to request each time
+        
+        logger.info(f"🔄 Starting scrolling search - target: {target_filtered_videos} filtered videos")
+        
+        while len(processed_videos) < target_filtered_videos and total_attempts < max_attempts:
+            total_attempts += 1
+            logger.info(f"📥 Search attempt {total_attempts}: Need {target_filtered_videos - len(processed_videos)} more filtered videos")
+            
+            try:
+                # Search for more videos
+                youtube_videos = await self._search_youtube_videos_batch(
+                    search_query, 
+                    videos_per_search,
+                    offset=total_attempts - 1  # Use attempt number as offset indicator
+                )
+                
+                if not youtube_videos:
+                    logger.warning(f"No videos found in attempt {total_attempts}")
+                    if total_attempts >= 3:  # After 3 attempts with no results, break
+                        break
+                    continue
+                
+                logger.info(f"Found {len(youtube_videos)} raw videos in attempt {total_attempts}")
+                
+                # Filter the new videos
+                batch_processed = await self._process_and_filter_videos(deps, youtube_videos)
+                
+                if not batch_processed:
+                    logger.warning(f"No videos passed filtering in attempt {total_attempts}")
+                    continue
+                
+                # Add new filtered videos (avoid duplicates)
+                existing_urls = {v.get('url') for v in processed_videos}
+                new_videos = [v for v in batch_processed if v.get('url') not in existing_urls]
+                
+                processed_videos.extend(new_videos)
+                
+                logger.info(f"✅ Attempt {total_attempts}: Added {len(new_videos)} new filtered videos. Total: {len(processed_videos)}")
+                
+                # Add delay between requests to be respectful
+                await asyncio.sleep(2.0)
+                
+            except Exception as e:
+                logger.error(f"❌ Error in search attempt {total_attempts}: {e}")
+                # Don't break on single failures, try again
+                await asyncio.sleep(3.0)
+                continue
+        
+        logger.info(f"🏁 Scrolling search complete: {len(processed_videos)} videos passed filters after {total_attempts} attempts")
+        return processed_videos
+    
+    async def _search_youtube_videos_batch(
+        self, 
+        search_query: str, 
+        batch_size: int = 50,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        Search YouTube for a batch of videos with offset simulation.
+        
+        Args:
+            search_query: YouTube search query
+            batch_size: Number of videos to request
+            offset: Attempt number to vary search slightly
+            
+        Returns:
+            List of video dictionaries
         """
         try:
-            logger.info(f"🔍 Searching YouTube for: '{search_query}'")
+            logger.info(f"🔍 Searching YouTube for: '{search_query}' (batch {offset + 1})")
             
-            # Use Crawl4AI YouTube agent with filters
+            # Use Crawl4AI YouTube agent with daily filter for fresh content
             result = await self.youtube_agent.search_videos(
                 query=search_query,
-                max_results=self.max_results,
-                upload_date="week"  # Recent uploads
+                max_results=batch_size,
+                upload_date="day"  # Daily fresh content for scheduled runs
             )
             
             # Extract videos from the result object
@@ -184,11 +258,11 @@ class MasterDiscoveryAgent:
                     })
                 return videos
             else:
-                logger.warning(f"YouTube search failed: {result.error_message}")
+                logger.warning(f"YouTube search failed for '{search_query}': {result.error_message}")
                 return []
             
         except Exception as e:
-            logger.error(f"❌ YouTube search failed: {e}")
+            logger.error(f"❌ YouTube search failed for batch {offset + 1}: {e}")
             return []
     
     async def _process_and_filter_videos(
@@ -376,7 +450,7 @@ class MasterDiscoveryAgent:
         Check if artist already exists in Supabase database.
         """
         try:
-            response = await deps.supabase.table("artist").select("id").ilike("name", f"%{artist_name}%").execute()
+            response = deps.supabase.table("artist").select("id").ilike("name", f"%{artist_name}%").execute()
             return len(response.data) > 0
         except Exception as e:
             logger.error(f"Error checking artist existence: {e}")
@@ -673,7 +747,7 @@ class MasterDiscoveryAgent:
             }
             
             # Insert into database
-            response = await deps.supabase.table("artist").insert(artist_data).execute()
+            response = deps.supabase.table("artist").insert(artist_data).execute()
             
             if response.data:
                 artist_record = response.data[0]

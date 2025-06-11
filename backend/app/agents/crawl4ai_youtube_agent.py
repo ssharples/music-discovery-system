@@ -290,12 +290,53 @@ class Crawl4AIYouTubeAgent:
             )
 
     async def _search_with_magic_mode(self, query: str, max_results: int, upload_date: str) -> YouTubeSearchResult:
-        """Search using magic mode with full automation."""
+        """Search using magic mode with full automation and scrolling."""
         browser_config = await self.get_browser_config()
         crawler_config = await self.get_crawler_config()
         
         # Ensure magic mode is enabled
         crawler_config.magic = True
+        
+        # Add JavaScript to scroll and load more videos
+        scroll_and_extract_js = """
+        (function() {
+            console.log('Starting scroll and extraction...');
+            
+            // Function to scroll page and wait for content to load
+            async function scrollAndWait() {
+                return new Promise((resolve) => {
+                    let scrollCount = 0;
+                    const maxScrolls = 5;
+                    const scrollInterval = 2000; // 2 seconds between scrolls
+                    
+                    function performScroll() {
+                        if (scrollCount < maxScrolls) {
+                            console.log(`Scroll ${scrollCount + 1}/${maxScrolls}`);
+                            
+                            // Scroll to bottom
+                            window.scrollTo(0, document.body.scrollHeight);
+                            
+                            scrollCount++;
+                            setTimeout(performScroll, scrollInterval);
+                        } else {
+                            console.log('Scrolling complete, waiting for final load...');
+                            setTimeout(resolve, 3000); // Wait 3 seconds after final scroll
+                        }
+                    }
+                    
+                    performScroll();
+                });
+            }
+            
+            // Start scrolling process
+            scrollAndWait().then(() => {
+                console.log('Scroll and extraction complete');
+            });
+        })();
+        """
+        
+        crawler_config.js_code = scroll_and_extract_js
+        crawler_config.delay_before_return_html = 15.0  # Extended delay for scrolling
         
         search_url = self._build_search_url(query, upload_date)
         
@@ -332,9 +373,11 @@ class Crawl4AIYouTubeAgent:
         crawler_config.magic = True
         crawler_config.scan_full_page = True
         
-        # Extended JavaScript for human-like behavior
+        # Enhanced JavaScript for human-like behavior and aggressive scrolling
         human_behavior_js = """
         (function() {
+            console.log('Starting enhanced human behavior simulation...');
+            
             // Simulate human-like behavior
             var delay = function(ms) { 
                 return new Promise(function(resolve) { 
@@ -344,43 +387,64 @@ class Crawl4AIYouTubeAgent:
             
             // Random mouse movements
             var simulateMouseMovement = function() {
-                var event = new MouseEvent('mousemove', {
-                    clientX: Math.random() * window.innerWidth,
-                    clientY: Math.random() * window.innerHeight
-                });
-                document.dispatchEvent(event);
+                for (let i = 0; i < 3; i++) {
+                    setTimeout(() => {
+                        var event = new MouseEvent('mousemove', {
+                            clientX: Math.random() * window.innerWidth,
+                            clientY: Math.random() * window.innerHeight
+                        });
+                        document.dispatchEvent(event);
+                    }, i * 500);
+                }
             };
             
-            // Simulate scroll behavior
-            var simulateScroll = function() {
+            // Enhanced scroll behavior to load more videos
+            var simulateEnhancedScroll = function() {
                 return new Promise(function(resolve) {
-                    var i = 0;
-                    var scrollStep = function() {
-                        if (i < 3) {
-                            window.scrollBy(0, Math.random() * 500 + 200);
-                            i++;
-                            setTimeout(scrollStep, Math.random() * 1000 + 500);
+                    let scrollAttempts = 0;
+                    const maxScrollAttempts = 8; // More scrolls for more videos
+                    
+                    var performScroll = function() {
+                        if (scrollAttempts < maxScrollAttempts) {
+                            console.log(`Enhanced scroll ${scrollAttempts + 1}/${maxScrollAttempts}`);
+                            
+                            // Scroll in increments to simulate human behavior
+                            const scrollHeight = document.body.scrollHeight;
+                            const currentScroll = window.pageYOffset;
+                            const scrollAmount = Math.min(500 + Math.random() * 300, scrollHeight - currentScroll);
+                            
+                            window.scrollBy(0, scrollAmount);
+                            
+                            // Simulate pause as human would do
+                            setTimeout(() => {
+                                scrollAttempts++;
+                                performScroll();
+                            }, Math.random() * 2000 + 1500); // 1.5-3.5 second delays
                         } else {
-                            resolve();
+                            console.log('Enhanced scrolling complete, final wait...');
+                            setTimeout(resolve, 4000); // Wait 4 seconds after final scroll
                         }
                     };
-                    scrollStep();
+                    
+                    performScroll();
                 });
             };
             
-            // Execute human simulation
+            // Execute enhanced human simulation
             delay(Math.random() * 2000 + 1000).then(function() {
                 simulateMouseMovement();
                 return delay(Math.random() * 1000 + 500);
             }).then(function() {
-                return simulateScroll();
+                return simulateEnhancedScroll();
             }).then(function() {
+                console.log('All human behavior simulation complete');
                 return delay(Math.random() * 2000 + 1000);
             });
         })();
         """
         
         crawler_config.js_code = human_behavior_js
+        crawler_config.delay_before_return_html = 25.0  # Extended delay for enhanced scrolling
         
         search_url = self._build_search_url(query, upload_date)
         
@@ -440,8 +504,9 @@ class Crawl4AIYouTubeAgent:
         if upload_date != "all":
             date_map = {
                 "hour": "EgIIAQ%253D%253D",
-                "today": "EgIIAg%253D%253D", 
-                "week": "EgIIAw%253D%253D",
+                "day": "EgIIAg%253D%253D",      # Today's uploads
+                "today": "EgIIAg%253D%253D",    # Alias for day
+                "week": "EgIIAw%253D%253D", 
                 "month": "EgIIBA%253D%253D",
                 "year": "EgIIBQ%253D%253D"
             }
@@ -477,7 +542,8 @@ class Crawl4AIYouTubeAgent:
             # YouTube search filter parameters
             date_filters = {
                 "hour": "EgIIAQ%253D%253D",
-                "today": "EgIIAg%253D%253D",
+                "day": "EgIIAg%253D%253D",      # Today's uploads
+                "today": "EgIIAg%253D%253D",    # Alias for day
                 "week": "EgIIAw%253D%253D", 
                 "month": "EgIIBA%253D%253D",
                 "year": "EgIIBQ%253D%253D"
@@ -525,7 +591,24 @@ class Crawl4AIYouTubeAgent:
         """Find video containers in desktop YouTube."""
         containers = []
         
-        for selector in self.selectors['videos']:
+        # Add more aggressive selectors to catch more videos
+        additional_selectors = [
+            'ytd-rich-item-renderer',  # Grid layout videos
+            'ytd-video-renderer',      # List layout videos
+            'ytd-compact-video-renderer',  # Compact videos
+            '[data-testid*="video"]',  # Any data-testid with "video"
+            'div[class*="ytd-video"]', # Any div with ytd-video class
+            'div[class*="video-renderer"]',  # Generic video renderer
+            'a[href*="/watch?v="]',    # Any link to watch URLs
+            'div[class*="rich-item"]', # Rich item containers
+            'div[class*="grid-video"]', # Grid video containers
+            '.contents > div',         # Generic content containers
+            'ytd-item-section-renderer div', # Item section contents
+        ]
+        
+        all_selectors = self.selectors['videos'] + additional_selectors
+        
+        for selector in all_selectors:
             found = soup.select(selector)
             if found:
                 containers.extend(found)
@@ -540,6 +623,7 @@ class Crawl4AIYouTubeAgent:
                 seen.add(container_id)
                 unique_containers.append(container)
         
+        logger.info(f"Total unique containers found: {len(unique_containers)}")
         return unique_containers
 
     def _find_mobile_video_containers(self, soup) -> list:
@@ -565,76 +649,147 @@ class Crawl4AIYouTubeAgent:
         try:
             # Extract title with multiple fallback strategies
             title = None
-            for selector in self.selectors['title']:
+            
+            # More aggressive title extraction
+            title_selectors = self.selectors['title'] + [
+                'a[title]',                    # Any link with title
+                'span[title]',                 # Any span with title
+                'div[title]',                  # Any div with title
+                'h3',                          # Any h3 tag
+                '[aria-label]',                # Any element with aria-label
+                'a[href*="/watch"]',           # Any watch link text
+                '.ytd-video-meta-block h3 a',  # Video meta block titles
+                'yt-formatted-string',         # YouTube formatted strings
+            ]
+            
+            for selector in title_selectors:
                 title_elem = container.select_one(selector)
                 if title_elem:
-                    title = title_elem.get('title') or title_elem.get('aria-label') or title_elem.get_text(strip=True)
-                    if title:
+                    title = (title_elem.get('title') or 
+                            title_elem.get('aria-label') or 
+                            title_elem.get_text(strip=True))
+                    if title and len(title.strip()) > 5:  # Basic validation
+                        title = title.strip()
                         break
             
+            # If no title found, try to find any text that looks like a title
             if not title:
+                text_elements = container.find_all(text=True)
+                for text in text_elements:
+                    text = text.strip()
+                    if len(text) > 10 and text not in ['', ' ', '\n']:
+                        title = text
+                        break
+            
+            if not title or len(title.strip()) < 3:
                 return None
             
-            # Extract URL
+            # Extract URL with more aggressive search
             url = None
-            link_elem = container.select_one('a[href*="/watch"]')
-            if link_elem:
-                href = link_elem.get('href')
-                if href:
-                    if href.startswith('/'):
-                        url = f"https://www.youtube.com{href}"
-                    else:
-                        url = href
+            
+            # Search for URLs in various attributes and elements
+            url_selectors = [
+                'a[href*="/watch"]',
+                'a[href*="youtube.com/watch"]',
+                '[data-href*="/watch"]',
+                '[href*="/watch"]',
+            ]
+            
+            for selector in url_selectors:
+                link_elem = container.select_one(selector)
+                if link_elem:
+                    href = link_elem.get('href') or link_elem.get('data-href')
+                    if href:
+                        if href.startswith('/'):
+                            url = f"https://www.youtube.com{href}"
+                        elif 'youtube.com' in href:
+                            url = href
+                        else:
+                            url = f"https://www.youtube.com{href}"
+                        break
+            
+            # Fallback: look for video ID in any data attributes
+            if not url:
+                for attr_name, attr_value in container.attrs.items():
+                    if 'video' in attr_name.lower() and len(str(attr_value)) == 11:
+                        url = f"https://www.youtube.com/watch?v={attr_value}"
+                        break
+            
+            # If still no URL, try to construct from title or other clues
+            if not url:
+                # Look for any 11-character strings that could be video IDs
+                all_text = str(container)
+                import re
+                video_id_pattern = r'[a-zA-Z0-9_-]{11}'
+                matches = re.findall(video_id_pattern, all_text)
+                for match in matches:
+                    if 'watch?v=' in all_text or '/watch/' in all_text:
+                        url = f"https://www.youtube.com/watch?v={match}"
+                        break
             
             if not url:
+                logger.debug(f"No URL found for title: {title}")
                 return None
             
-            # Extract channel name
-            channel_name = None
-            for selector in self.selectors['channel']:
+            # Extract channel name with more fallbacks
+            channel_name = "Unknown"
+            channel_selectors = self.selectors['channel'] + [
+                'a[href*="/channel/"]',
+                'a[href*="/@"]',
+                '.ytd-channel-name',
+                '[data-testid*="channel"]',
+                'span[class*="channel"]',
+            ]
+            
+            for selector in channel_selectors:
                 channel_elem = container.select_one(selector)
                 if channel_elem:
-                    channel_name = channel_elem.get_text(strip=True)
-                    if channel_name:
+                    channel_text = channel_elem.get_text(strip=True)
+                    if channel_text and len(channel_text) > 1:
+                        channel_name = channel_text
                         break
             
-            # Extract view count
-            view_count = None
+            # Extract view count (optional)
+            view_count = "Unknown"
             for selector in self.selectors['views']:
                 views_elem = container.select_one(selector)
                 if views_elem:
                     view_text = views_elem.get_text(strip=True)
-                    if 'view' in view_text.lower():
+                    if view_text and ('view' in view_text.lower() or any(c.isdigit() for c in view_text)):
                         view_count = view_text
                         break
             
-            # Extract duration
-            duration = None
+            # Extract duration (optional)
+            duration = "Unknown"
             for selector in self.selectors['duration']:
                 duration_elem = container.select_one(selector)
                 if duration_elem:
-                    duration = duration_elem.get_text(strip=True)
-                    if duration and ':' in duration:
+                    duration_text = duration_elem.get_text(strip=True)
+                    if duration_text and ':' in duration_text:
+                        duration = duration_text
                         break
             
-            # Extract upload date
-            upload_date = None
+            # Extract upload date (optional)
+            upload_date = "Unknown"
             for selector in self.selectors['upload_date']:
                 date_elem = container.select_one(selector)
                 if date_elem:
                     date_text = date_elem.get_text(strip=True)
-                    if 'ago' in date_text.lower():
+                    if date_text and 'ago' in date_text.lower():
                         upload_date = date_text
                         break
             
-            return YouTubeVideo(
-                title=title.strip(),
+            video = YouTubeVideo(
+                title=title,
                 url=url,
-                channel_name=channel_name.strip() if channel_name else "Unknown",
-                view_count=view_count.strip() if view_count else "0 views",
-                duration=duration.strip() if duration else "Unknown",
-                upload_date=upload_date.strip() if upload_date else "Unknown"
+                channel_name=channel_name,
+                view_count=view_count,
+                duration=duration,
+                upload_date=upload_date
             )
+            
+            logger.debug(f"✅ Extracted video: {title[:50]}... from {channel_name}")
+            return video
             
         except Exception as e:
             logger.warning(f"Error extracting video data: {e}")
