@@ -1,6 +1,6 @@
 """
-Crawl4AI Enrichment Agent - Replaces Firecrawl for all enrichment scraping
-Uses Crawl4AI for Spotify, Instagram, TikTok, and Musixmatch scraping
+Enhanced Crawl4AI Enrichment Agent with LLM Content Filtering
+Uses advanced Crawl4AI features including LLM-based content filtering and extraction
 """
 import asyncio
 import json
@@ -10,7 +10,10 @@ from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
-from crawl4ai.extraction_strategy import JsonCssExtractionStrategy
+from crawl4ai.extraction_strategy import JsonCssExtractionStrategy, LLMExtractionStrategy
+from crawl4ai.content_filter import LLMContentFilter
+from crawl4ai.llm_config import LLMConfig
+from crawl4ai.markdown_generator import DefaultMarkdownGenerator
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.deepseek import DeepSeekProvider
@@ -23,15 +26,41 @@ logger = logging.getLogger(__name__)
 
 
 class Crawl4AIEnrichmentAgent:
-    """Enrichment agent using Crawl4AI for all web scraping"""
+    """Enhanced enrichment agent with LLM content filtering and advanced Crawl4AI features"""
     
     def __init__(self):
-        """Initialize the Crawl4AI enrichment agent"""
-        # Browser config for general scraping
+        """Initialize the enhanced Crawl4AI enrichment agent"""
+        # Enhanced browser configurations
         self.browser_config = BrowserConfig(
             headless=True,
             viewport_width=1920,
-            viewport_height=1080
+            viewport_height=1080,
+            java_script_enabled=True,
+            ignore_https_errors=True
+        )
+        
+        # Stealth browser config for anti-bot measures
+        self.stealth_config = BrowserConfig(
+            headless=True,
+            viewport_width=1920,
+            viewport_height=1080,
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+            extra_args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-features=VizDisplayCompositor",
+                "--disable-dev-shm-usage",
+                "--no-sandbox",
+                "--disable-web-security"
+            ]
+        )
+        
+        # LLM configuration for content filtering
+        self.llm_config = LLMConfig(
+            provider="deepseek",
+            model="deepseek-chat",
+            api_key=settings.DEEPSEEK_API_KEY,
+            temperature=0.3,
+            max_tokens=1000
         )
         
         # AI data cleaner for all extracted data
@@ -47,7 +76,105 @@ class Crawl4AIEnrichmentAgent:
             Return a concise analysis focused on artistic themes."""
         )
         
-        logger.info("✅ Crawl4AI Enrichment Agent initialized with AI data cleaning")
+        logger.info("✅ Enhanced Crawl4AI Enrichment Agent initialized with LLM content filtering")
+    
+    async def create_spotify_content_filter(self) -> LLMContentFilter:
+        """Create LLM-based content filter for Spotify pages"""
+        return LLMContentFilter(
+            llm_config=self.llm_config,
+            instruction="""
+            Extract only the following from Spotify artist pages:
+            - Monthly listener count (numbers)
+            - Artist biography/description text
+            - Top cities/location data
+            - Social media links (Instagram, Twitter, Facebook, YouTube)
+            - Genre information
+            - Top tracks/songs list
+            
+            Exclude:
+            - Navigation menus
+            - Cookie notices and privacy banners
+            - Advertising content
+            - Unrelated recommendations
+            - User interface elements
+            - JavaScript/CSS code
+            """,
+            chunk_token_threshold=500,
+            verbose=True
+        )
+    
+    async def create_instagram_content_filter(self) -> LLMContentFilter:
+        """Create LLM-based content filter for Instagram pages"""
+        return LLMContentFilter(
+            llm_config=self.llm_config,
+            instruction="""
+            Extract only the following from Instagram profile pages:
+            - Follower count numbers
+            - Following count numbers
+            - Posts count numbers
+            - Biography/bio text
+            - Username/handle
+            - Verification status
+            
+            Exclude:
+            - Stories and posts content
+            - Comments and user interactions
+            - Navigation elements
+            - Advertising content
+            - Cookie notices
+            - Login prompts
+            """,
+            chunk_token_threshold=300,
+            verbose=True
+        )
+    
+    async def create_tiktok_content_filter(self) -> LLMContentFilter:
+        """Create LLM-based content filter for TikTok pages"""
+        return LLMContentFilter(
+            llm_config=self.llm_config,
+            instruction="""
+            Extract only the following from TikTok profile pages:
+            - Follower count numbers
+            - Following count numbers
+            - Likes count numbers
+            - Biography/bio text
+            - Username/handle
+            - Verification status
+            
+            Exclude:
+            - Video content and thumbnails
+            - Comments and interactions
+            - Navigation elements
+            - For You page content
+            - Advertising content
+            - Download prompts
+            """,
+            chunk_token_threshold=300,
+            verbose=True
+        )
+    
+    async def create_lyrics_content_filter(self) -> LLMContentFilter:
+        """Create LLM-based content filter for lyrics pages"""
+        return LLMContentFilter(
+            llm_config=self.llm_config,
+            instruction="""
+            Extract only the following from lyrics pages:
+            - Song lyrics text (verse and chorus content)
+            - Song title
+            - Artist name
+            - Album information
+            
+            Exclude:
+            - Advertisements
+            - User comments and reviews
+            - Navigation menus
+            - Related songs sections
+            - Social sharing buttons
+            - Video player interfaces
+            """,
+            chunk_token_threshold=800,
+            verbose=True
+        )
     
     async def enrich_artist(self, artist_profile: ArtistProfile) -> EnrichedArtistData:
         """
@@ -127,7 +254,7 @@ class Crawl4AIEnrichmentAgent:
         return enriched_data
     
     async def _enrich_spotify(self, artist_profile: ArtistProfile, enriched_data: EnrichedArtistData):
-        """Enrich with Spotify data using flexible extraction approach"""
+        """Enrich with Spotify data using LLM content filtering"""
         try:
             spotify_url = artist_profile.spotify_url
             if not spotify_url and artist_profile.spotify_id:
@@ -137,14 +264,24 @@ class Crawl4AIEnrichmentAgent:
                 logger.warning("⚠️ No Spotify URL available for enrichment")
                 return
                 
-            logger.info(f"🎵 Crawling Spotify: {spotify_url}")
+            logger.info(f"🎵 Crawling Spotify with LLM filtering: {spotify_url}")
             
-            # Flexible crawler config - don't wait for specific elements
+            # Create LLM content filter for Spotify
+            content_filter = await self.create_spotify_content_filter()
+            
+            # Create markdown generator with LLM filter
+            markdown_generator = DefaultMarkdownGenerator(
+                content_filter=content_filter,
+                options={"ignore_links": False}
+            )
+            
+            # Enhanced crawler config with LLM filtering
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
-                wait_until="domcontentloaded",  # Don't wait for specific elements
-                page_timeout=15000,  # Shorter timeout
-                delay_before_return_html=4.0,  # Wait for content to load
+                markdown_generator=markdown_generator,
+                wait_until="domcontentloaded",
+                page_timeout=20000,  # Increased timeout for LLM processing
+                delay_before_return_html=5.0,  # More time for content filtering
                 js_code="""
                 // Wait for page load and scroll to load content
                 await new Promise(resolve => setTimeout(resolve, 3000));
@@ -152,6 +289,8 @@ class Crawl4AIEnrichmentAgent:
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 console.log('Spotify artist page loaded');
                 """,
+                magic=True,  # Enable anti-bot features
+                simulate_user=True,
                 verbose=True
             )
             
@@ -407,9 +546,18 @@ class Crawl4AIEnrichmentAgent:
             logger.info("⚠️ Continuing without Spotify data")
     
     async def _enrich_instagram(self, instagram_url: str, enriched_data: EnrichedArtistData):
-        """Enrich with Instagram data using multiple extraction strategies"""
+        """Enrich with Instagram data using LLM content filtering"""
         try:
-            logger.info(f"📸 Crawling Instagram: {instagram_url}")
+            logger.info(f"📸 Crawling Instagram with LLM filtering: {instagram_url}")
+            
+            # Create LLM content filter for Instagram
+            content_filter = await self.create_instagram_content_filter()
+            
+            # Create markdown generator with LLM filter
+            markdown_generator = DefaultMarkdownGenerator(
+                content_filter=content_filter,
+                options={"ignore_links": False}
+            )
             
             # Enhanced schema for Instagram data extraction with current selectors
             schema = {
@@ -448,15 +596,18 @@ class Crawl4AIEnrichmentAgent:
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
                 extraction_strategy=extraction_strategy,
+                markdown_generator=markdown_generator,
                 wait_until="domcontentloaded",
                 page_timeout=30000,
-                delay_before_return_html=4.0,
+                delay_before_return_html=5.0,  # More time for LLM filtering
                 js_code="""
                 // Wait for page load and scroll slightly to trigger content
                 await new Promise(resolve => setTimeout(resolve, 3000));
                 window.scrollTo(0, 300);
                 await new Promise(resolve => setTimeout(resolve, 2000));
-                """
+                """,
+                magic=True,  # Enable anti-bot features
+                simulate_user=True
             )
             
             async with AsyncWebCrawler(config=self.browser_config) as crawler:
@@ -535,9 +686,18 @@ class Crawl4AIEnrichmentAgent:
             logger.error(f"❌ Instagram enrichment error: {str(e)}")
     
     async def _enrich_tiktok(self, tiktok_url: str, enriched_data: EnrichedArtistData):
-        """Enrich with TikTok data using robust extraction"""
+        """Enrich with TikTok data using LLM content filtering"""
         try:
-            logger.info(f"🎭 Crawling TikTok: {tiktok_url}")
+            logger.info(f"🎭 Crawling TikTok with LLM filtering: {tiktok_url}")
+            
+            # Create LLM content filter for TikTok
+            content_filter = await self.create_tiktok_content_filter()
+            
+            # Create markdown generator with LLM filter
+            markdown_generator = DefaultMarkdownGenerator(
+                content_filter=content_filter,
+                options={"ignore_links": False}
+            )
             
             # Enhanced schema for TikTok data extraction with current selectors
             schema = {
@@ -581,15 +741,18 @@ class Crawl4AIEnrichmentAgent:
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
                 extraction_strategy=extraction_strategy,
+                markdown_generator=markdown_generator,
                 wait_until="domcontentloaded",
                 page_timeout=30000,
-                delay_before_return_html=4.0,
+                delay_before_return_html=5.0,  # More time for LLM filtering
                 js_code="""
                 // Wait for page load and try to trigger any lazy loading
                 await new Promise(resolve => setTimeout(resolve, 4000));
                 window.scrollTo(0, 500);
                 await new Promise(resolve => setTimeout(resolve, 2000));
-                """
+                """,
+                magic=True,  # Enable anti-bot features
+                simulate_user=True
             )
             
             async with AsyncWebCrawler(config=self.browser_config) as crawler:
@@ -779,9 +942,18 @@ class Crawl4AIEnrichmentAgent:
         return lyrics_text
     
     async def _get_musixmatch_lyrics(self, clean_artist: str, clean_track: str) -> str:
-        """Extract lyrics from Musixmatch"""
+        """Extract lyrics from Musixmatch with LLM content filtering"""
         try:
             musixmatch_url = f"https://www.musixmatch.com/lyrics/{clean_artist}/{clean_track}"
+            
+            # Create LLM content filter for lyrics
+            content_filter = await self.create_lyrics_content_filter()
+            
+            # Create markdown generator with LLM filter
+            markdown_generator = DefaultMarkdownGenerator(
+                content_filter=content_filter,
+                options={"ignore_links": False}
+            )
             
             # Enhanced schema for Musixmatch lyrics extraction with current selectors
             schema = {
@@ -810,9 +982,10 @@ class Crawl4AIEnrichmentAgent:
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
                 extraction_strategy=extraction_strategy,
+                markdown_generator=markdown_generator,
                 wait_until="domcontentloaded",
-                page_timeout=20000,
-                delay_before_return_html=3.0,
+                page_timeout=25000,  # Increased timeout for LLM processing
+                delay_before_return_html=4.0,  # More time for content filtering
                 js_code="""
                 // Wait for lyrics to load and handle any overlays
                 await new Promise(resolve => setTimeout(resolve, 3000));
@@ -822,7 +995,9 @@ class Crawl4AIEnrichmentAgent:
                 closeButtons.forEach(btn => btn.click());
                 
                 await new Promise(resolve => setTimeout(resolve, 1000));
-                """
+                """,
+                magic=True,  # Enable anti-bot features
+                simulate_user=True
             )
             
             async with AsyncWebCrawler(config=self.browser_config) as crawler:

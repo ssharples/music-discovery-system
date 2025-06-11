@@ -97,6 +97,147 @@ class Crawl4AIYouTubeAgent:
         }
         
         logger.info("✅ Enhanced Crawl4AI YouTube Agent initialized with anti-blocking features")
+    
+    async def search_videos_with_session(self, query: str, max_results: int = 100, session_id: str = None) -> YouTubeSearchResult:
+        """
+        Search YouTube videos using persistent session for better infinite scrolling.
+        
+        Args:
+            query: Search query
+            max_results: Maximum number of results to return  
+            session_id: Optional session identifier for persistence
+            
+        Returns:
+            YouTubeSearchResult with videos found
+        """
+        if not session_id:
+            import uuid
+            session_id = f"youtube_search_{uuid.uuid4().hex[:8]}"
+        
+        logger.info(f"🔗 Starting session-based search: {session_id}")
+        
+        try:
+            # Enhanced browser config for session
+            browser_config = BrowserConfig(
+                headless=True,
+                viewport_width=1920,
+                viewport_height=1080,
+                user_agent=random.choice(self.user_agents),
+                java_script_enabled=True,
+                ignore_https_errors=True,
+                extra_args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-features=VizDisplayCompositor",
+                    "--disable-dev-shm-usage",
+                    "--no-sandbox",
+                    "--disable-web-security"
+                ]
+            )
+            
+            # Multi-step JavaScript interactions
+            js_interactions = [
+                {
+                    "description": "Initial page load",
+                    "js_code": """
+                    // Wait for page to stabilize
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    console.log('🎬 YouTube page loaded');
+                    """,
+                    "wait_for": "css:ytd-app",
+                    "delay": 2.0
+                },
+                {
+                    "description": "Accept cookies if needed",
+                    "js_code": """
+                    // Handle cookie consent
+                    const acceptButtons = document.querySelectorAll('[aria-label*="Accept"], [aria-label*="accept"], button[aria-label*="Accept"]');
+                    acceptButtons.forEach(btn => {
+                        if (btn.innerText.toLowerCase().includes('accept') || btn.innerText.toLowerCase().includes('agree')) {
+                            btn.click();
+                            console.log('✅ Accepted cookies');
+                        }
+                    });
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    """,
+                    "wait_for": None,
+                    "delay": 1.0
+                },
+                {
+                    "description": "Advanced infinite scroll",
+                    "js_code": self.get_advanced_infinite_scroll_js(target_videos=max_results),
+                    "wait_for": "css:ytd-video-renderer",
+                    "delay": 5.0
+                }
+            ]
+            
+            search_url = self._build_search_url(query, "all")
+            
+            async with AsyncWebCrawler(config=browser_config) as crawler:
+                results = []
+                
+                for i, interaction in enumerate(js_interactions):
+                    logger.info(f"🔄 Session step {i+1}: {interaction['description']}")
+                    
+                    # Create config for this interaction
+                    config = CrawlerRunConfig(
+                        cache_mode=CacheMode.BYPASS,
+                        js_code=interaction["js_code"],
+                        wait_for=interaction["wait_for"],
+                        session_id=session_id,
+                        page_timeout=45000 if i == len(js_interactions) - 1 else 20000,  # Longer timeout for scroll step
+                        delay_before_return_html=interaction["delay"],
+                        magic=True,
+                        simulate_user=True,
+                        verbose=True
+                    )
+                    
+                    # Add delay between interactions
+                    if i > 0:
+                        await asyncio.sleep(interaction["delay"])
+                    
+                    # Execute crawl step
+                    result = await crawler.arun(url=search_url, config=config)
+                    
+                    if not result.success:
+                        logger.error(f"❌ Session step {i+1} failed: {result.error_message}")
+                        if i == 0:  # If initial load fails, abort
+                            break
+                        continue
+                    
+                    results.append(result)
+                    logger.info(f"✅ Session step {i+1} completed")
+                
+                # Extract videos from the final result
+                if results:
+                    final_result = results[-1]
+                    videos = await self._extract_videos_from_html(final_result.html, max_results)
+                    
+                    logger.info(f"🎯 Session search found {len(videos)} videos")
+                    return YouTubeSearchResult(
+                        query=query,
+                        videos=videos,
+                        total_results=len(videos),
+                        success=len(videos) > 0,
+                        error_message=None if videos else "No videos extracted from session"
+                    )
+                else:
+                    return YouTubeSearchResult(
+                        query=query,
+                        videos=[],
+                        total_results=0,
+                        success=False,
+                        error_message="Session search failed - no successful steps"
+                    )
+                    
+        except Exception as e:
+            logger.error(f"❌ Session search error: {e}")
+            return YouTubeSearchResult(
+                query=query,
+                videos=[],
+                total_results=0,
+                success=False,
+                error_message=f"Session search exception: {str(e)}"
+            )
 
     async def get_browser_config(self) -> BrowserConfig:
         """Create randomized browser configuration with anti-detection features."""
@@ -146,7 +287,175 @@ class Crawl4AIYouTubeAgent:
             ]
         )
 
-    async def get_crawler_config(self) -> CrawlerRunConfig:
+    def get_advanced_infinite_scroll_js(self, target_videos: int = 100) -> str:
+        """Generate advanced infinite scroll JavaScript with multiple strategies"""
+        return f"""
+        (async function() {{
+            let previousHeight = 0;
+            let currentHeight = document.body.scrollHeight;
+            let scrollAttempts = 0;
+            const maxAttempts = 30;
+            let noNewContentCount = 0;
+            const maxNoNewContent = 5;
+            
+            console.log('🚀 Starting advanced infinite scroll for {target_videos} videos');
+            
+            while (scrollAttempts < maxAttempts && noNewContentCount < maxNoNewContent) {{
+                // Count current videos using multiple selectors
+                const videoSelectors = [
+                    'ytd-video-renderer',
+                    'ytd-grid-video-renderer', 
+                    'ytd-compact-video-renderer',
+                    '[data-testid="video-renderer"]',
+                    'div[class*="video-renderer"]'
+                ];
+                
+                let videoCount = 0;
+                for (const selector of videoSelectors) {{
+                    const videos = document.querySelectorAll(selector);
+                    if (videos.length > videoCount) {{
+                        videoCount = videos.length;
+                    }}
+                }}
+                
+                console.log(`📊 Current videos found: ${{videoCount}}`);
+                
+                if (videoCount >= {target_videos}) {{
+                    console.log('🎯 Target reached!');
+                    break;
+                }}
+                
+                // Strategy 1: Progressive scrolling with varying speeds
+                const scrollStep = Math.floor(Math.random() * 500) + 300; // 300-800px
+                window.scrollBy(0, scrollStep);
+                await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 400));
+                
+                // Strategy 2: Scroll to bottom periodically
+                if (scrollAttempts % 3 === 0) {{
+                    window.scrollTo(0, document.body.scrollHeight);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }}
+                
+                // Strategy 3: Element-based scrolling
+                if (scrollAttempts % 5 === 0) {{
+                    const videos = document.querySelectorAll('ytd-video-renderer, ytd-grid-video-renderer');
+                    if (videos.length > 0) {{
+                        const lastVideo = videos[videos.length - 1];
+                        lastVideo.scrollIntoView({{behavior: 'smooth', block: 'center'}});
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }}
+                }}
+                
+                // Strategy 4: Trigger scroll events manually
+                if (scrollAttempts % 4 === 0) {{
+                    ['scroll', 'wheel', 'touchmove'].forEach(eventType => {{
+                        window.dispatchEvent(new Event(eventType, {{bubbles: true}}));
+                        document.dispatchEvent(new Event(eventType, {{bubbles: true}}));
+                    }});
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }}
+                
+                // Strategy 5: Focus on scroll containers
+                if (scrollAttempts % 6 === 0) {{
+                    const containers = [
+                        'ytd-app',
+                        'div#contents',
+                        'div#primary',
+                        '.ytd-section-list-renderer'
+                    ];
+                    
+                    for (const containerSelector of containers) {{
+                        const container = document.querySelector(containerSelector);
+                        if (container) {{
+                            container.scrollTop = container.scrollHeight;
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                        }}
+                    }}
+                }}
+                
+                // Strategy 6: Hover and interact with elements to trigger lazy loading
+                if (scrollAttempts % 7 === 0) {{
+                    const elements = document.querySelectorAll('ytd-video-renderer, [data-lazy]');
+                    for (let i = 0; i < Math.min(5, elements.length); i++) {{
+                        const element = elements[i];
+                        element.dispatchEvent(new MouseEvent('mouseover', {{bubbles: true}}));
+                        element.dispatchEvent(new Event('focus', {{bubbles: true}}));
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }}
+                }}
+                
+                // Check for height change
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                previousHeight = currentHeight;
+                currentHeight = document.body.scrollHeight;
+                
+                if (currentHeight === previousHeight) {{
+                    noNewContentCount++;
+                    console.log(`⚠️ No height change detected (${{noNewContentCount}}/${{maxNoNewContent}})`);
+                    
+                    // Try alternative scroll methods when stuck
+                    const alternativeContainers = [
+                        document.querySelector('ytd-app'),
+                        document.querySelector('#primary'),
+                        document.querySelector('#contents'),
+                        document.body
+                    ];
+                    
+                    for (const container of alternativeContainers) {{
+                        if (container) {{
+                            container.scrollTop = container.scrollHeight;
+                            await new Promise(resolve => setTimeout(resolve, 800));
+                        }}
+                    }}
+                    
+                    // Trigger intersection observer manually
+                    const observer = new IntersectionObserver((entries) => {{
+                        entries.forEach(entry => {{
+                            if (entry.isIntersecting) {{
+                                entry.target.dispatchEvent(new Event('intersect'));
+                            }}
+                        }});
+                    }});
+                    
+                    document.querySelectorAll('[data-lazy], ytd-video-renderer').forEach(el => {{
+                        observer.observe(el);
+                    }});
+                    
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    observer.disconnect();
+                }} else {{
+                    noNewContentCount = 0;
+                }}
+                
+                scrollAttempts++;
+                
+                // Random delay between attempts to appear more human
+                const delay = 800 + Math.random() * 1200; // 800-2000ms
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }}
+            
+            // Final count
+            let finalVideoCount = 0;
+            const videoSelectors = [
+                'ytd-video-renderer',
+                'ytd-grid-video-renderer', 
+                'ytd-compact-video-renderer'
+            ];
+            
+            for (const selector of videoSelectors) {{
+                const videos = document.querySelectorAll(selector);
+                if (videos.length > finalVideoCount) {{
+                    finalVideoCount = videos.length;
+                }}
+            }}
+            
+            console.log(`✅ Infinite scroll complete: ${{finalVideoCount}} videos found after ${{scrollAttempts}} attempts`);
+            window.__video_count = finalVideoCount;
+            window.__scroll_complete = true;
+        }})();
+        """
+
+    async def get_crawler_config(self, target_videos: int = 100) -> CrawlerRunConfig:
         """Create randomized crawler configuration with stealth features."""
         # Random locale/timezone
         locale_config = random.choice(self.locales)
@@ -303,40 +612,21 @@ class Crawl4AIYouTubeAgent:
             )
 
     async def _search_with_magic_mode(self, query: str, max_results: int, upload_date: str) -> YouTubeSearchResult:
-        """Search using magic mode with full automation and scrolling - FAST VERSION."""
+        """Search using magic mode with advanced infinite scroll."""
         try:
             browser_config = await self.get_browser_config()
-            crawler_config = await self.get_crawler_config()
+            crawler_config = await self.get_crawler_config(target_videos=max_results)
             
             # Ensure magic mode is enabled
             crawler_config.magic = True
             
-            # Fast scrolling JavaScript
-            fast_scroll_js = """
-            (function() {
-                console.log('Magic mode - starting fast scroll...');
-                
-                let scrollCount = 0;
-                const maxScrolls = 2; // Even faster for magic mode
-                
-                function quickScroll() {
-                    if (scrollCount < maxScrolls) {
-                        console.log(`Magic scroll ${scrollCount + 1}/${maxScrolls}`);
-                        window.scrollBy(0, 600);
-                        scrollCount++;
-                        setTimeout(quickScroll, 600); // 0.6s delays
-                    } else {
-                        console.log('Magic scrolling complete');
-                    }
-                }
-                
-                quickScroll();
-            })();
-            """
+            # Use advanced infinite scroll JavaScript
+            advanced_scroll_js = self.get_advanced_infinite_scroll_js(target_videos=max_results)
+            crawler_config.js_code = advanced_scroll_js
             
-            crawler_config.js_code = fast_scroll_js
-            crawler_config.delay_before_return_html = 5.0  # Much faster
-            crawler_config.page_timeout = 15000  # 15 second timeout
+            # Increase timeouts for infinite scroll
+            crawler_config.page_timeout = 60000  # 1 minute for scrolling
+            crawler_config.delay_before_return_html = 8.0  # More time for content to load
             
             search_url = self._build_search_url(query, upload_date)
             logger.info(f"🔍 Magic mode search URL: {search_url}")
