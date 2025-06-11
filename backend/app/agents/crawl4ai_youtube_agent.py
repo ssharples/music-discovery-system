@@ -798,19 +798,31 @@ class Crawl4AIYouTubeAgent:
     def _extract_video_id_from_url(self, url: str) -> Optional[str]:
         """Extract video ID from YouTube URL with multiple patterns."""
         try:
+            if not url:
+                return None
+                
             import re
             patterns = [
-                r'watch\?v=([a-zA-Z0-9_-]{11})',
-                r'youtu\.be/([a-zA-Z0-9_-]{11})',
-                r'embed/([a-zA-Z0-9_-]{11})'
+                r'watch\?v=([a-zA-Z0-9_-]{11})',  # Standard watch URLs
+                r'youtu\.be/([a-zA-Z0-9_-]{11})', # Short URLs
+                r'embed/([a-zA-Z0-9_-]{11})',     # Embed URLs
+                r'/watch/([a-zA-Z0-9_-]{11})',    # Alternative watch format
+                r'v=([a-zA-Z0-9_-]{11})',         # Simple v= parameter
+                r'([a-zA-Z0-9_-]{11})',           # Last resort - 11 char string
             ]
             
             for pattern in patterns:
                 match = re.search(pattern, url)
                 if match:
-                    return match.group(1)
+                    video_id = match.group(1)
+                    # Validate it's actually 11 characters (YouTube video ID length)
+                    if len(video_id) == 11:
+                        return video_id
+            
+            logger.debug(f"Could not extract video ID from URL: {url}")
             return None
-        except:
+        except Exception as e:
+            logger.debug(f"Error extracting video ID from URL {url}: {e}")
             return None
 
     def get_cost_estimate(self, expected_videos: int) -> float:
@@ -863,21 +875,47 @@ class Crawl4AIYouTubeAgent:
                 # Extract all videos from the final HTML
                 logger.info("🎬 Extracting videos from scrolled content...")
                 all_videos = await self._extract_videos_from_html(result.html, target_videos * 10)
+                logger.info(f"📊 Successfully extracted {len(all_videos)} videos")
                 
-                # Remove duplicates using video_id property
+                # Remove duplicates using video_id and title
                 unique_videos = []
                 seen_ids = set()
+                seen_titles = set()
+                videos_without_id = 0
+                duplicate_ids = 0
+                duplicate_titles = 0
+                
                 for video in all_videos:
                     video_id = getattr(video, 'video_id', None) or self._extract_video_id_from_url(video.url)
-                    if video_id and video_id not in seen_ids:
-                        # Add video_id as property if missing
-                        if not hasattr(video, 'video_id'):
-                            video.video_id = video_id
-                        unique_videos.append(video)
-                        seen_ids.add(video_id)
-                        if len(unique_videos) >= target_videos:
-                            break
+                    
+                    # Skip videos without valid ID
+                    if not video_id:
+                        videos_without_id += 1
+                        continue
+                    
+                    # Skip duplicate IDs
+                    if video_id in seen_ids:
+                        duplicate_ids += 1
+                        continue
+                    
+                    # Skip very similar titles (fuzzy deduplication)
+                    title_lower = video.title.lower() if video.title else ""
+                    if title_lower in seen_titles:
+                        duplicate_titles += 1
+                        continue
+                    
+                    # Add video_id as property if missing
+                    if not hasattr(video, 'video_id'):
+                        video.video_id = video_id
+                    
+                    unique_videos.append(video)
+                    seen_ids.add(video_id)
+                    seen_titles.add(title_lower)
+                    
+                    if len(unique_videos) >= target_videos:
+                        break
                 
+                logger.info(f"🔍 Deduplication stats: {videos_without_id} without ID, {duplicate_ids} duplicate IDs, {duplicate_titles} duplicate titles")
                 logger.info(f"🏁 Infinite scroll complete: {len(unique_videos)} unique videos found")
                 return YouTubeSearchResult(
                     query=query,

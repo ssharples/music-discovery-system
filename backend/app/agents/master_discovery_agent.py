@@ -947,41 +947,68 @@ class MasterDiscoveryAgent:
 
     def _validate_title_contains_search_terms(self, title: str) -> bool:
         """
-        Validate if the title contains "official music video" or acceptable variations (case insensitive).
+        Validate if the title appears to be a legitimate music video (less restrictive).
         """
         if not title:
             return False
             
         title_lower = title.lower()
         
-        # Primary search term - must contain "official music video"
-        if "official music video" in title_lower:
-            return True
-            
-        # Accept close variations that are still high quality
-        acceptable_variations = [
-            "official video",     # Sometimes abbreviated
-            "music video",        # If combined with artist/song structure
-            "official mv",        # Common abbreviation
-            "official audio",     # Audio-only official releases
+        # Primary high-quality indicators
+        high_quality_terms = [
+            "official music video",
+            "official video", 
+            "official mv",
+            "official audio",
+            "official lyric video",
+            "official visualizer"
         ]
         
-        for variation in acceptable_variations:
-            if variation in title_lower:
-                # Additional validation: ensure it's structured like a proper music video
-                # Must contain typical music video patterns
-                music_patterns = [
-                    r'\w+\s*-\s*\w+',  # Artist - Song format
-                    r'\w+\s*\|\s*\w+',  # Artist | Song format  
-                    r'\w+:\s*\w+',      # Artist: Song format
-                    r'\([^)]*official[^)]*\)',  # (Official something)
-                    r'\[[^\]]*official[^\]]*\]'  # [Official something]
-                ]
-                
-                import re
-                for pattern in music_patterns:
-                    if re.search(pattern, title_lower):
-                        return True
+        for term in high_quality_terms:
+            if term in title_lower:
+                return True
+        
+        # Secondary indicators - look for music video structure
+        import re
+        music_patterns = [
+            r'\w+\s*-\s*\w+',  # Artist - Song format
+            r'\w+\s*\|\s*\w+',  # Artist | Song format  
+            r'\w+:\s*\w+',      # Artist: Song format
+        ]
+        
+        has_music_structure = False
+        for pattern in music_patterns:
+            if re.search(pattern, title_lower):
+                has_music_structure = True
+                break
+        
+        if has_music_structure:
+            # More flexible secondary terms
+            secondary_terms = [
+                "music video",
+                "mv",
+                "video",
+                "lyric video", 
+                "lyrics",
+                "visualizer",
+                "performance",
+                "live"
+            ]
+            
+            for term in secondary_terms:
+                if term in title_lower:
+                    return True
+            
+            # Even if no explicit "video" term, accept if it has proper music structure
+            # and doesn't contain obvious negative indicators
+            negative_indicators = [
+                "cover", "remix by", "reaction", "tutorial", 
+                "how to", "instrumental", "karaoke", "mashup"
+            ]
+            
+            has_negative = any(neg in title_lower for neg in negative_indicators)
+            if not has_negative:
+                return True
         
         return False
     
