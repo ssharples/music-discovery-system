@@ -31,6 +31,9 @@ from app.core.dependencies import PipelineDependencies
 from app.models.artist import ArtistProfile
 from app.core.config import settings
 
+# AI imports for DeepSeek-powered data cleaning
+from app.agents.ai_data_cleaner import get_ai_cleaner, AIDataCleaner
+
 logger = logging.getLogger(__name__)
 
 class MasterDiscoveryAgent:
@@ -42,6 +45,9 @@ class MasterDiscoveryAgent:
         # Initialize all sub-agents
         self.youtube_agent = Crawl4AIYouTubeAgent()
         self.enrichment_agent = Crawl4AIEnrichmentAgent()
+        
+        # Initialize AI data cleaner
+        self.ai_cleaner = get_ai_cleaner()
         
         # Configuration
         self.exclude_keywords = [
@@ -209,8 +215,8 @@ class MasterDiscoveryAgent:
                     if not self._validate_title_contains_search_terms(video_title):
                         continue
                     
-                    # Step 2: Extract artist name from video title
-                    artist_name = self._extract_artist_name(video_title)
+                    # Step 2: Extract and clean artist name using AI
+                    artist_name = await self._extract_and_clean_artist_name(video_title)
                     if not artist_name:
                         continue
                     
@@ -226,8 +232,9 @@ class MasterDiscoveryAgent:
                     if not self._validate_content(video_title, video.get('description', '')):
                         continue
                     
-                    # Step 6: Extract social media links from description
-                    social_links = self._extract_social_links_from_description(video.get('description', ''))
+                    # Step 6: Extract and clean social media links from description
+                    raw_social_links = self._extract_social_links_from_description(video.get('description', ''))
+                    social_links = await self._clean_social_links(raw_social_links)
                     
                     # Step 7: CRITICAL FILTER - Only process artists with existing social media links
                     if not social_links:
@@ -235,16 +242,28 @@ class MasterDiscoveryAgent:
                         continue
                     
                     # Must have at least one of: Spotify, Instagram, or TikTok
-                    has_required_social = any(platform in social_links for platform in ['spotify', 'instagram', 'tiktok'])
+                    has_required_social = any(getattr(social_links, platform, None) for platform in ['spotify', 'instagram', 'tiktok'])
                     if not has_required_social:
                         logger.debug(f"⏭️ Skipping {artist_name} - no Spotify/Instagram/TikTok links found")
                         continue
                     
-                    logger.info(f"✅ Artist {artist_name} has social links: {list(social_links.keys())}")
+                    cleaned_links_dict = {
+                        k: v for k, v in {
+                            'instagram': social_links.instagram,
+                            'tiktok': social_links.tiktok,
+                            'spotify': social_links.spotify,
+                            'twitter': social_links.twitter,
+                            'facebook': social_links.facebook,
+                            'youtube': social_links.youtube,
+                            'website': social_links.website
+                        }.items() if v
+                    }
+                    
+                    logger.info(f"✅ Artist {artist_name} has cleaned social links: {list(cleaned_links_dict.keys())}")
                     
                     # Add processed data to video
                     video['extracted_artist_name'] = artist_name
-                    video['social_links'] = social_links
+                    video['social_links'] = cleaned_links_dict
                     
                     processed_videos.append(video)
                     logger.debug(f"✅ Video passed all filters: {artist_name} - {video_title}")
@@ -589,6 +608,92 @@ class MasterDiscoveryAgent:
         logger.debug(f"Extracted social links from description: {links}")
         return links
     
+    async def _extract_and_clean_artist_name(self, title: str) -> Optional[str]:
+        """
+        Extract and clean artist name using AI with regex fallback.
+        """
+        if not title:
+            return None
+        
+        # First try AI cleaning
+        if self.ai_cleaner and self.ai_cleaner.is_available():
+            try:
+                # Try AI extraction with original regex as baseline
+                regex_result = self._extract_artist_name(title)
+                cleaned_result = await self.ai_cleaner.clean_artist_name(title, regex_result)
+                
+                if cleaned_result and cleaned_result.confidence_score >= 0.7:
+                    logger.info(f"🤖 AI cleaned artist: '{cleaned_result.artist_name}' (confidence: {cleaned_result.confidence_score:.2f})")
+                    logger.debug(f"AI reasoning: {cleaned_result.reasoning}")
+                    return cleaned_result.artist_name
+                elif cleaned_result:
+                    logger.warning(f"⚠️ Low confidence AI result: {cleaned_result.confidence_score:.2f}")
+                    # Still use it but with warning
+                    return cleaned_result.artist_name
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ AI artist extraction failed: {e}")
+        
+        # Fallback to regex method
+        logger.info("🔄 Using regex fallback for artist extraction")
+        return self._extract_artist_name(title)
+    
+    async def _clean_social_links(self, raw_links: Dict[str, str]) -> Optional[object]:
+        """
+        Clean and validate social media links using AI.
+        """
+        if not raw_links:
+            return None
+        
+        # Try AI cleaning
+        if self.ai_cleaner and self.ai_cleaner.is_available():
+            try:
+                cleaned_links = await self.ai_cleaner.clean_social_links(raw_links)
+                if cleaned_links and cleaned_links.confidence_score >= 0.6:
+                    logger.info(f"🔗 AI cleaned social links (confidence: {cleaned_links.confidence_score:.2f})")
+                    return cleaned_links
+                else:
+                    logger.warning(f"⚠️ Low confidence social link cleaning")
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ AI social link cleaning failed: {e}")
+        
+        # Fallback: return raw links in expected format
+        logger.info("🔄 Using raw social links without AI cleaning")
+        
+        # Create a simple object with the raw links
+        class RawSocialLinks:
+            def __init__(self, links):
+                self.instagram = links.get('instagram')
+                self.tiktok = links.get('tiktok')
+                self.spotify = links.get('spotify')
+                self.twitter = links.get('twitter')
+                self.facebook = links.get('facebook')
+                self.youtube = links.get('youtube')
+                self.website = links.get('website')
+        
+        return RawSocialLinks(raw_links)
+    
+    async def _clean_channel_data(self, raw_data: Dict[str, Any]) -> Optional[object]:
+        """
+        Clean YouTube channel data using AI.
+        """
+        if not raw_data or not self.ai_cleaner or not self.ai_cleaner.is_available():
+            return None
+        
+        try:
+            cleaned_data = await self.ai_cleaner.clean_channel_data(raw_data)
+            if cleaned_data and cleaned_data.confidence_score >= 0.6:
+                logger.info(f"📺 AI cleaned channel data (confidence: {cleaned_data.confidence_score:.2f})")
+                return cleaned_data
+            else:
+                logger.warning(f"⚠️ Low confidence channel data cleaning")
+                return cleaned_data
+                
+        except Exception as e:
+            logger.warning(f"⚠️ AI channel data cleaning failed: {e}")
+            return None
+    
     def _create_artist_profile(self, video_data: Dict[str, Any]) -> ArtistProfile:
         """
         Create initial artist profile from video data.
@@ -780,7 +885,20 @@ class MasterDiscoveryAgent:
                                 channel_data['social_links_from_channel'] = self._extract_social_links_from_html(result.html)
                             
                             if channel_data['subscriber_count'] > 0 or channel_data['social_links_from_channel']:
-                                logger.info(f"✅ Successfully crawled YouTube channel: {channel_data['subscriber_count']:,} subscribers, {len(channel_data['social_links_from_channel'])} social links")
+                                # Clean channel data using AI
+                                cleaned_data = await self._clean_channel_data(channel_data)
+                                if cleaned_data:
+                                    channel_data.update({
+                                        'channel_name': cleaned_data.channel_name,
+                                        'subscriber_count': cleaned_data.subscriber_count,
+                                        'channel_description': cleaned_data.channel_description,
+                                        'verified': cleaned_data.is_verified,
+                                        'ai_confidence': cleaned_data.confidence_score,
+                                        'cleaning_notes': cleaned_data.cleaning_notes
+                                    })
+                                    logger.info(f"✅ AI cleaned channel data: {cleaned_data.channel_name} ({cleaned_data.subscriber_count:,} subscribers, confidence: {cleaned_data.confidence_score:.2f})")
+                                else:
+                                    logger.info(f"✅ Successfully crawled YouTube channel: {channel_data['subscriber_count']:,} subscribers, {len(channel_data['social_links_from_channel'])} social links")
                                 return channel_data
                             
                 except Exception as e:

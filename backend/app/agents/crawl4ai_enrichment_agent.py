@@ -17,6 +17,7 @@ from pydantic_ai.providers.deepseek import DeepSeekProvider
 
 from app.models.artist import ArtistProfile, EnrichedArtistData
 from app.core.config import settings
+from app.agents.ai_data_cleaner import get_ai_cleaner
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,9 @@ class Crawl4AIEnrichmentAgent:
             viewport_height=1080
         )
         
+        # AI data cleaner for all extracted data
+        self.ai_cleaner = get_ai_cleaner()
+        
         # DeepSeek agent for lyrics analysis
         self.lyrics_analyzer = Agent(
             model=OpenAIModel('deepseek-chat', provider=DeepSeekProvider()),
@@ -43,7 +47,7 @@ class Crawl4AIEnrichmentAgent:
             Return a concise analysis focused on artistic themes."""
         )
         
-        logger.info("✅ Crawl4AI Enrichment Agent initialized")
+        logger.info("✅ Crawl4AI Enrichment Agent initialized with AI data cleaning")
     
     async def enrich_artist(self, artist_profile: ArtistProfile) -> EnrichedArtistData:
         """
@@ -504,11 +508,28 @@ class Crawl4AIEnrichmentAgent:
                                 except (ValueError, TypeError):
                                     continue
                     
-                    instagram_followers = enriched_data.profile.follower_counts.get('instagram', 0)
-                    if instagram_followers:
-                        logger.info(f"✅ Instagram followers: {instagram_followers:,}")
+                    # Clean Instagram data using AI
+                    raw_instagram_data = {
+                        'follower_count_text': instagram_data.get('follower_count_text', ''),
+                        'username': instagram_data.get('username', ''),
+                        'bio': instagram_data.get('bio', ''),
+                        'posts_count': instagram_data.get('posts_count', ''),
+                        'following_count': instagram_data.get('following_count', '')
+                    }
+                    
+                    cleaned_instagram = await self._clean_platform_data('instagram', raw_instagram_data)
+                    if cleaned_instagram and cleaned_instagram.follower_count:
+                        enriched_data.profile.follower_counts['instagram'] = cleaned_instagram.follower_count
+                        if cleaned_instagram.bio_text:
+                            enriched_data.profile.metadata['instagram_bio'] = cleaned_instagram.bio_text
+                        logger.info(f"✅ AI cleaned Instagram: {cleaned_instagram.follower_count:,} followers (confidence: {cleaned_instagram.confidence_score:.2f})")
                     else:
-                        logger.warning("⚠️ Could not extract Instagram follower count")
+                        # Fallback to original extraction
+                        instagram_followers = enriched_data.profile.follower_counts.get('instagram', 0)
+                        if instagram_followers:
+                            logger.info(f"✅ Instagram followers: {instagram_followers:,}")
+                        else:
+                            logger.warning("⚠️ Could not extract Instagram follower count")
                     
         except Exception as e:
             logger.error(f"❌ Instagram enrichment error: {str(e)}")
@@ -1117,6 +1138,26 @@ class Crawl4AIEnrichmentAgent:
             score += 0.10
         
         return min(score, 1.0)
+    
+    async def _clean_platform_data(self, platform: str, raw_data: Dict[str, Any]) -> Optional[object]:
+        """
+        Clean platform data using AI.
+        """
+        if not raw_data or not self.ai_cleaner or not self.ai_cleaner.is_available():
+            return None
+        
+        try:
+            cleaned_data = await self.ai_cleaner.clean_platform_data(platform, raw_data)
+            if cleaned_data and cleaned_data.confidence_score >= 0.6:
+                logger.info(f"📱 AI cleaned {platform} data (confidence: {cleaned_data.confidence_score:.2f})")
+                return cleaned_data
+            else:
+                logger.warning(f"⚠️ Low confidence {platform} data cleaning")
+                return cleaned_data
+                
+        except Exception as e:
+            logger.warning(f"⚠️ AI {platform} data cleaning failed: {e}")
+            return None
     
     def get_cost_estimate(self, artist_profile: ArtistProfile) -> Dict[str, Any]:
         """
