@@ -168,6 +168,19 @@ class MasterDiscoveryAgent:
         """
         logger.info(f"🔄 Starting infinite scroll search - target: {target_filtered_videos} filtered videos")
         
+        # Statistics tracking for the new fallback mechanism
+        stats = {
+            'total_videos': 0,
+            'passed_title_filter': 0,
+            'passed_artist_extraction': 0,
+            'passed_database_checks': 0,
+            'passed_content_validation': 0,
+            'found_social_in_description': 0,
+            'found_social_via_channel_fallback': 0,
+            'failed_social_requirement': 0,
+            'final_success': 0
+        }
+        
         try:
             # Single search with infinite scrolling to get raw videos
             logger.info(f"🔍 Performing infinite scroll search for: '{search_query}'")
@@ -186,6 +199,7 @@ class MasterDiscoveryAgent:
                 return []
             
             logger.info(f"✅ Infinite scroll found {len(result.videos)} raw videos")
+            stats['total_videos'] = len(result.videos)
             
             # Convert videos to the expected format
             youtube_videos = []
@@ -200,6 +214,7 @@ class MasterDiscoveryAgent:
                     'upload_date': video.upload_date,
                     'video_id': self._extract_video_id(video.url),
                     'channel_id': self._extract_channel_id(video.url),
+                    'channel_url': f"https://www.youtube.com/channel/{self._extract_channel_id(video.url)}" if self._extract_channel_id(video.url) else None,
                     'description': ''  # Description not available from search
                 })
             
@@ -214,11 +229,13 @@ class MasterDiscoveryAgent:
                     # Step 1: Validate title contains "official music video" (case insensitive)
                     if not self._validate_title_contains_search_terms(video_title):
                         continue
+                    stats['passed_title_filter'] += 1
                     
                     # Step 2: Extract and clean artist name using AI
                     artist_name = await self._extract_and_clean_artist_name(video_title)
                     if not artist_name:
                         continue
+                    stats['passed_artist_extraction'] += 1
                     
                     # Step 3: Check if this specific video has already been processed
                     if await self._video_exists_in_database(deps, video.get('url', '')):
@@ -227,45 +244,80 @@ class MasterDiscoveryAgent:
                     # Step 4: Check if artist already exists in database
                     if await self._artist_exists_in_database(deps, artist_name):
                         continue
+                    stats['passed_database_checks'] += 1
                     
                     # Step 5: Validate content (check for AI/cover keywords)
                     if not self._validate_content(video_title, video.get('description', '')):
                         continue
+                    stats['passed_content_validation'] += 1
                     
                     # Step 6: Extract and clean social media links from description
                     raw_social_links = self._extract_social_links_from_description(video.get('description', ''))
                     social_links = await self._clean_social_links(raw_social_links)
                     
-                    # Step 7: CRITICAL FILTER - Only process artists with existing social media links
-                    if not social_links:
-                        logger.debug(f"⏭️ Skipping {artist_name} - no social media links found in description")
-                        continue
+                    # Step 7: ENHANCED SOCIAL MEDIA DISCOVERY - Try channel fallback if description lacks links
+                    has_required_social = False
+                    social_source = "none"
                     
-                    # Must have at least one of: Spotify, Instagram, or TikTok
-                    has_required_social = any(getattr(social_links, platform, None) for platform in ['spotify', 'instagram', 'tiktok'])
+                    if social_links:
+                        has_required_social = any(getattr(social_links, platform, None) for platform in ['spotify', 'instagram', 'tiktok'])
+                        if has_required_social:
+                            social_source = "description"
+                            stats['found_social_in_description'] += 1
+                    
                     if not has_required_social:
-                        logger.debug(f"⏭️ Skipping {artist_name} - no Spotify/Instagram/TikTok links found")
+                        logger.info(f"🔍 No social links in description for {artist_name} - trying channel fallback")
+                        
+                        # Fallback: Try to extract social links from YouTube channel About page
+                        try:
+                            channel_social_links = await self._extract_social_from_channel(video.get('channel_url'))
+                            if channel_social_links:
+                                logger.info(f"✅ Found social links from channel: {list(channel_social_links.keys())}")
+                                
+                                # Merge channel links with description links
+                                if not social_links:
+                                    social_links = await self._clean_social_links(channel_social_links)
+                                else:
+                                    # Update existing social_links object with channel findings
+                                    for platform, url in channel_social_links.items():
+                                        if not getattr(social_links, platform, None):
+                                            setattr(social_links, platform, url)
+                                
+                                # Re-check if we now have required social links
+                                has_required_social = any(getattr(social_links, platform, None) for platform in ['spotify', 'instagram', 'tiktok'])
+                                if has_required_social:
+                                    social_source = "channel_fallback"
+                                    stats['found_social_via_channel_fallback'] += 1
+                        except Exception as e:
+                            logger.warning(f"⚠️ Channel social link extraction failed for {artist_name}: {e}")
+                    
+                    # Final check: Must have at least one of the required social platforms
+                    if not has_required_social:
+                        logger.debug(f"⏭️ Skipping {artist_name} - no Spotify/Instagram/TikTok links found in description OR channel")
+                        stats['failed_social_requirement'] += 1
                         continue
                     
                     cleaned_links_dict = {
                         k: v for k, v in {
-                            'instagram': social_links.instagram,
-                            'tiktok': social_links.tiktok,
-                            'spotify': social_links.spotify,
-                            'twitter': social_links.twitter,
-                            'facebook': social_links.facebook,
-                            'youtube': social_links.youtube,
-                            'website': social_links.website
+                            'instagram': getattr(social_links, 'instagram', None),
+                            'tiktok': getattr(social_links, 'tiktok', None),
+                            'spotify': getattr(social_links, 'spotify', None),
+                            'twitter': getattr(social_links, 'twitter', None),
+                            'facebook': getattr(social_links, 'facebook', None),
+                            'youtube': getattr(social_links, 'youtube', None),
+                            'website': getattr(social_links, 'website', None)
                         }.items() if v
                     }
                     
-                    logger.info(f"✅ Artist {artist_name} has cleaned social links: {list(cleaned_links_dict.keys())}")
+                    logger.info(f"✅ Artist {artist_name} has social links ({social_source}): {list(cleaned_links_dict.keys())}")
                     
                     # Add processed data to video
                     video['extracted_artist_name'] = artist_name
                     video['social_links'] = cleaned_links_dict
+                    video['social_source'] = social_source  # Track where social links came from
                     
                     processed_videos.append(video)
+                    stats['final_success'] += 1
                     logger.debug(f"✅ Video passed all filters: {artist_name} - {video_title}")
                     
                     # Stop if we've reached our target
@@ -277,7 +329,19 @@ class MasterDiscoveryAgent:
                     logger.error(f"Error processing video: {e}")
                     continue
             
+            # Log filtering statistics
+            logger.info(f"📊 FILTERING STATISTICS:")
+            logger.info(f"   Total videos scraped: {stats['total_videos']}")
+            logger.info(f"   Passed title filter: {stats['passed_title_filter']} ({stats['passed_title_filter']/stats['total_videos']*100:.1f}%)")
+            logger.info(f"   Passed artist extraction: {stats['passed_artist_extraction']} ({stats['passed_artist_extraction']/stats['total_videos']*100:.1f}%)")
+            logger.info(f"   Passed database checks: {stats['passed_database_checks']} ({stats['passed_database_checks']/stats['total_videos']*100:.1f}%)")
+            logger.info(f"   Passed content validation: {stats['passed_content_validation']} ({stats['passed_content_validation']/stats['total_videos']*100:.1f}%)")
+            logger.info(f"   Found social in description: {stats['found_social_in_description']}")
+            logger.info(f"   Found social via channel fallback: {stats['found_social_via_channel_fallback']}")
+            logger.info(f"   Failed social requirement: {stats['failed_social_requirement']}")
+            logger.info(f"   FINAL SUCCESS: {stats['final_success']} ({stats['final_success']/stats['total_videos']*100:.1f}%)")
             logger.info(f"🏁 Infinite scroll filtering complete: {len(processed_videos)} videos passed all filters")
+            
             return processed_videos
             
         except asyncio.TimeoutError:
@@ -1326,4 +1390,195 @@ class MasterDiscoveryAgent:
                     break
         
         return social_links
+    
+    async def _extract_social_from_channel(self, channel_url: str) -> Dict[str, str]:
+        """
+        Extract social media links from YouTube channel About page as fallback.
+        
+        Args:
+            channel_url: YouTube channel URL
+            
+        Returns:
+            Dictionary of social media links found on channel
+        """
+        if not channel_url:
+            return {}
+        
+        logger.info(f"🔍 Extracting social links from channel: {channel_url}")
+        
+        try:
+            # Use Crawl4AI to scrape the channel's About page
+            from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+            
+            browser_config = BrowserConfig(
+                headless=True,
+                browser_type="chromium",
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+            
+            # Build the About page URL
+            about_url = channel_url.rstrip('/') + '/about'
+            
+            async with AsyncWebCrawler(config=browser_config) as crawler:
+                config = CrawlerRunConfig(
+                    word_count_threshold=10,
+                    extraction_strategy=None,  # Just get raw content
+                    css_selector=None,
+                    screenshot=False,
+                    pdf=False,
+                    verbose=False
+                )
+                
+                result = await crawler.arun(
+                    url=about_url,
+                    config=config,
+                    session_id=f"channel_social_{hash(channel_url)}"
+                )
+                
+                if not result.success:
+                    logger.warning(f"⚠️ Failed to crawl channel About page: {about_url}")
+                    return {}
+                
+                # Extract social links from the HTML content
+                social_links = self._extract_social_links_from_channel_html(result.html)
+                
+                if social_links:
+                    logger.info(f"✅ Found {len(social_links)} social links from channel About page")
+                    return social_links
+                else:
+                    logger.debug(f"No social links found in channel About page")
+                    return {}
+                    
+        except Exception as e:
+            logger.error(f"❌ Error extracting social links from channel {channel_url}: {e}")
+            return {}
+    
+    def _extract_social_links_from_channel_html(self, html: str) -> Dict[str, str]:
+        """
+        Extract social media links from YouTube channel About page HTML.
+        
+        Args:
+            html: HTML content from channel About page
+            
+        Returns:
+            Dictionary of extracted social media links
+        """
+        if not html:
+            return {}
+        
+        links = {}
+        
+        # Instagram patterns - look for various formats in channel HTML
+        instagram_patterns = [
+            r'(?:https?://)?(?:www\.)?instagram\.com/([a-zA-Z0-9_.]+)/?',
+            r'"instagram"[^"]*"([^"]*instagram\.com/[a-zA-Z0-9_.]+)"',
+            r'instagram\.com/([a-zA-Z0-9_.]+)',
+        ]
+        
+        for pattern in instagram_patterns:
+            matches = re.finditer(pattern, html, re.IGNORECASE)
+            for match in matches:
+                if 'instagram' not in links:
+                    if match.groups():
+                        username = match.group(1)
+                        if len(username) > 1 and '.' not in username[-3:]:  # Basic validation
+                            links['instagram'] = f"https://instagram.com/{username}"
+                            break
+                    else:
+                        # Full URL captured
+                        full_url = match.group(0)
+                        if 'instagram.com/' in full_url:
+                            links['instagram'] = full_url if full_url.startswith('http') else f"https://{full_url}"
+                            break
+        
+        # TikTok patterns
+        tiktok_patterns = [
+            r'(?:https?://)?(?:www\.)?tiktok\.com/@([a-zA-Z0-9_.]+)/?',
+            r'"tiktok"[^"]*"([^"]*tiktok\.com/@[a-zA-Z0-9_.]+)"',
+            r'tiktok\.com/@([a-zA-Z0-9_.]+)',
+        ]
+        
+        for pattern in tiktok_patterns:
+            matches = re.finditer(pattern, html, re.IGNORECASE)
+            for match in matches:
+                if 'tiktok' not in links:
+                    if match.groups():
+                        username = match.group(1)
+                        if len(username) > 1:
+                            links['tiktok'] = f"https://tiktok.com/@{username}"
+                            break
+                    else:
+                        full_url = match.group(0)
+                        if 'tiktok.com/@' in full_url:
+                            links['tiktok'] = full_url if full_url.startswith('http') else f"https://{full_url}"
+                            break
+        
+        # Spotify patterns
+        spotify_patterns = [
+            r'(?:https?://)?open\.spotify\.com/artist/([a-zA-Z0-9]+)',
+            r'"spotify"[^"]*"([^"]*spotify\.com/artist/[a-zA-Z0-9]+)"',
+            r'spotify\.com/artist/([a-zA-Z0-9]+)',
+        ]
+        
+        for pattern in spotify_patterns:
+            matches = re.finditer(pattern, html, re.IGNORECASE)
+            for match in matches:
+                if 'spotify' not in links:
+                    if match.groups():
+                        artist_id = match.group(1)
+                        if len(artist_id) == 22:  # Spotify artist ID length
+                            links['spotify'] = f"https://open.spotify.com/artist/{artist_id}"
+                            break
+                    else:
+                        full_url = match.group(0)
+                        if 'spotify.com/artist/' in full_url:
+                            links['spotify'] = full_url if full_url.startswith('http') else f"https://{full_url}"
+                            break
+        
+        # Twitter/X patterns
+        twitter_patterns = [
+            r'(?:https?://)?(?:www\.)?(?:twitter\.com|x\.com)/([a-zA-Z0-9_]+)/?',
+            r'"twitter"[^"]*"([^"]*(?:twitter\.com|x\.com)/[a-zA-Z0-9_]+)"',
+            r'(?:twitter\.com|x\.com)/([a-zA-Z0-9_]+)',
+        ]
+        
+        for pattern in twitter_patterns:
+            matches = re.finditer(pattern, html, re.IGNORECASE)
+            for match in matches:
+                if 'twitter' not in links:
+                    if match.groups():
+                        username = match.group(1)
+                        if len(username) > 1 and username not in ['home', 'login', 'signup', 'explore']:
+                            links['twitter'] = f"https://twitter.com/{username}"
+                            break
+                    else:
+                        full_url = match.group(0)
+                        if any(domain in full_url for domain in ['twitter.com/', 'x.com/']):
+                            links['twitter'] = full_url if full_url.startswith('http') else f"https://{full_url}"
+                            break
+        
+        # Facebook patterns
+        facebook_patterns = [
+            r'(?:https?://)?(?:www\.)?facebook\.com/([a-zA-Z0-9_.]+)/?',
+            r'"facebook"[^"]*"([^"]*facebook\.com/[a-zA-Z0-9_.]+)"',
+            r'facebook\.com/([a-zA-Z0-9_.]+)',
+        ]
+        
+        for pattern in facebook_patterns:
+            matches = re.finditer(pattern, html, re.IGNORECASE)
+            for match in matches:
+                if 'facebook' not in links:
+                    if match.groups():
+                        page_name = match.group(1)
+                        if len(page_name) > 1 and page_name not in ['login', 'home', 'pages']:
+                            links['facebook'] = f"https://facebook.com/{page_name}"
+                            break
+                    else:
+                        full_url = match.group(0)
+                        if 'facebook.com/' in full_url:
+                            links['facebook'] = full_url if full_url.startswith('http') else f"https://{full_url}"
+                            break
+        
+        logger.debug(f"Extracted social links from channel HTML: {links}")
+        return links
  
