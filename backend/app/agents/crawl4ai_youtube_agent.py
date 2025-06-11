@@ -206,12 +206,12 @@ class Crawl4AIYouTubeAgent:
         success = False
         error_message = None
         
-        # Multiple search strategies (ordered by complexity)
+        # Multiple search strategies (ordered by scrolling capability for discovery)
         search_strategies = [
-            self._search_with_basic_config,  # Start with basic approach
-            self._search_with_magic_mode,
-            self._search_with_extended_stealth,
-            self._search_with_mobile_emulation
+            self._search_with_extended_stealth,  # Start with best scrolling
+            self._search_with_magic_mode,        # Backup scrolling
+            self._search_with_basic_config,      # Fallback no-scroll
+            self._search_with_mobile_emulation   # Last resort
         ]
         
         for strategy_index, strategy in enumerate(search_strategies):
