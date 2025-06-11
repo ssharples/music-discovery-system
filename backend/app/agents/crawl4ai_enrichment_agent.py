@@ -69,33 +69,42 @@ class Crawl4AIEnrichmentAgent:
         # Parallel enrichment tasks
         tasks = []
         
-        # Spotify enrichment - search and enrich based on artist name
-        tasks.append(self._search_and_enrich_spotify(artist_profile.name, enriched_data))
-        
-        # Social media enrichment (if links available)
+        # Social media enrichment using ONLY provided links (no searching)
+        # This ensures accuracy since we only process artists with confirmed social links
         instagram_url = None
         tiktok_url = None
+        spotify_url = None
         
         if hasattr(artist_profile, 'social_links') and artist_profile.social_links:
             instagram_url = artist_profile.social_links.get('instagram')
             tiktok_url = artist_profile.social_links.get('tiktok')
+            spotify_url = artist_profile.social_links.get('spotify')
             
             if instagram_url:
-                logger.info(f"📸 Adding Instagram enrichment task: {instagram_url}")
+                logger.info(f"📸 Using provided Instagram link: {instagram_url}")
                 tasks.append(self._enrich_instagram(instagram_url, enriched_data))
             
             if tiktok_url:
-                logger.info(f"🎭 Adding TikTok enrichment task: {tiktok_url}")
+                logger.info(f"🎭 Using provided TikTok link: {tiktok_url}")
                 tasks.append(self._enrich_tiktok(tiktok_url, enriched_data))
-        
-        # If no social links found, try to search for them
-        if not instagram_url:
-            logger.info(f"🔍 No Instagram link found, will search by artist name")
-            tasks.append(self._search_and_enrich_instagram(artist_profile.name, enriched_data))
-        
-        if not tiktok_url:
-            logger.info(f"🔍 No TikTok link found, will search by artist name")
-            tasks.append(self._search_and_enrich_tiktok(artist_profile.name, enriched_data))
+            
+            # If we have a direct Spotify link, use it instead of searching
+            if spotify_url:
+                logger.info(f"🎵 Using provided Spotify link: {spotify_url}")
+                # Create temporary profile with Spotify URL for direct enrichment
+                temp_profile = ArtistProfile(
+                    name=artist_profile.name,
+                    spotify_url=spotify_url
+                )
+                tasks.append(self._enrich_spotify(temp_profile, enriched_data))
+            else:
+                # Only search Spotify if no direct link provided
+                logger.info(f"🔍 No direct Spotify link, will search by artist name")
+                tasks.append(self._search_and_enrich_spotify(artist_profile.name, enriched_data))
+        else:
+            logger.warning(f"⚠️ No social links provided for {artist_profile.name} - this should not happen with new filtering")
+            # Fallback to search (but this shouldn't happen with new filtering)
+            tasks.append(self._search_and_enrich_spotify(artist_profile.name, enriched_data))
         
         logger.info(f"🚀 Running {len(tasks)} enrichment tasks in parallel")
         
