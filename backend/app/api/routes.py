@@ -364,11 +364,12 @@ async def test_discovery(
         # Test 4: Simple YouTube search (if configured)
         try:
             from app.core.config import settings
-            if settings.is_youtube_configured() and hasattr(orchestrator, 'youtube_agent'):
-                # Test via orchestrator instead of direct agent
-                results["youtube_search"] = "success: YouTube configured and orchestrator ready"
+            # Crawl4AI YouTube agent works without API keys since it uses web scraping
+            # Check if orchestrator has YouTube agent instead of API key
+            if hasattr(orchestrator, 'youtube_agent') and orchestrator.youtube_agent is not None:
+                results["youtube_search"] = "success: Crawl4AI YouTube agent ready (no API key required)"
             else:
-                results["youtube_search"] = "skipped: YouTube not configured or not available"
+                results["youtube_search"] = "skipped: YouTube agent not available"
         except Exception as e:
             results["youtube_search"] = f"failed: {e}"
         

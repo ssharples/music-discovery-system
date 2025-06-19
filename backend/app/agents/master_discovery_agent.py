@@ -55,10 +55,22 @@ class MasterDiscoveryAgent:
         
         # Configuration
         self.exclude_keywords = [
-            'ai', 'suno', 'generated', 'udio', 'cover', 'remix',
-            'artificial intelligence', 'ai-generated', 'ai music'
+            'ai', 'suno', 'generated', 'udio', 'cover', 'remix', 'remastered',
+            'artificial intelligence', 'ai-generated', 'ai music', 'ai created',
+            'machine learning', 'neural', 'bot', 'automated', 'synthetic'
         ]
+        
+        # Well-known artists to exclude (indicates AI/cover content)
+        self.well_known_artists = [
+            'taylor swift', 'drake', 'ariana grande', 'justin bieber', 'billie eilish',
+            'the weeknd', 'dua lipa', 'ed sheeran', 'post malone', 'olivia rodrigo',
+            'harry styles', 'bad bunny', 'doja cat', 'lil nas x', 'travis scott',
+            'kanye west', 'eminem', 'rihanna', 'beyoncé', 'adele', 'bruno mars',
+            'coldplay', 'imagine dragons', 'maroon 5', 'twenty one pilots'
+        ]
+        
         self.max_results = 1000
+        self.max_view_count = 50000  # 50k view limit
         
         logger.info("✅ Master Discovery Agent initialized")
     
@@ -209,9 +221,15 @@ class MasterDiscoveryAgent:
             videos = search_result.videos
             logger.info(f"✅ Infinite scroll found {len(videos)} raw videos ⏱️ {scroll_time:.1f}s")
             
-            if not videos:
+            # DEBUG: Log sample of found videos
+            if videos:
+                logger.info("🔍 Sample of found videos:")
+                for i, video in enumerate(videos[:3]):
+                    logger.info(f"  {i+1}. {getattr(video, 'title', 'No title')[:80]}...")
+                    logger.info(f"     Channel: {getattr(video, 'channel_name', 'No channel')}")
+                    logger.info(f"     Views: {getattr(video, 'view_count', 'No views')}")
+            else:
                 logger.warning("❌ No videos found from YouTube search")
-                return []
             
             # Initialize filtering statistics
             stats = {
@@ -247,6 +265,7 @@ class MasterDiscoveryAgent:
                     if not self._validate_title_contains_search_terms(video_title):
                         step_time = time.time() - step_start
                         progress_logger.debug(f"❌ Video {i} failed title filter ⏱️ {step_time:.3f}s")
+                        logger.info(f"DEBUG: Video '{video_title}' failed title validation")
                         continue
                     
                     stats['passed_title_filter'] += 1
@@ -282,9 +301,42 @@ class MasterDiscoveryAgent:
                     step_time = time.time() - step_start
                     progress_logger.debug(f"✅ Video {i} passed database checks ⏱️ {step_time:.3f}s")
                     
-                    # Step 4: Content validation
+                    # Step 4: View count filtering  
                     step_start = time.time()
+                    view_count = getattr(video, 'view_count', 0)
+                    if not self._validate_view_count(view_count):
+                        step_time = time.time() - step_start
+                        progress_logger.debug(f"❌ Video {i} failed view count filter ({view_count:,} views) ⏱️ {step_time:.3f}s")
+                        continue
+                    
+                    # Step 5: English language validation
+                    if not self._validate_english_language(artist_name):
+                        step_time = time.time() - step_start
+                        progress_logger.debug(f"❌ Video {i} failed English validation ⏱️ {step_time:.3f}s")
+                        continue
+                    
+                    # Step 6: Well-known artist check
+                    if self._is_well_known_artist(artist_name):
+                        step_time = time.time() - step_start
+                        progress_logger.debug(f"❌ Video {i} filtered - well-known artist '{artist_name}' ⏱️ {step_time:.3f}s")
+                        continue
+
+                    # Step 7: Enhanced content validation + FULL description retrieval
                     description = getattr(video, 'description', '')
+                    
+                    # CRITICAL FIX: If we only have a snippet, crawl the full video page
+                    if not description or len(description) < 100 or 'snippet' in description.lower():
+                        progress_logger.debug(f"🔍 Video {i} has limited description ('{description[:50]}...'), crawling full video page...")
+                        try:
+                            full_video_data = await self._get_full_video_description(video.url)
+                            if full_video_data and full_video_data.get('description'):
+                                description = full_video_data['description']
+                                progress_logger.debug(f"✅ Video {i} retrieved full description ({len(description)} chars)")
+                            else:
+                                progress_logger.debug(f"⚠️ Video {i} failed to get full description")
+                        except Exception as e:
+                            progress_logger.debug(f"⚠️ Video {i} error getting full description: {e}")
+                    
                     if not self._validate_content(video_title, description):
                         step_time = time.time() - step_start
                         progress_logger.debug(f"❌ Video {i} failed content validation ⏱️ {step_time:.3f}s")
@@ -292,11 +344,11 @@ class MasterDiscoveryAgent:
                         
                     stats['passed_content_validation'] += 1
                     step_time = time.time() - step_start
-                    progress_logger.debug(f"✅ Video {i} passed content validation ⏱️ {step_time:.3f}s")
+                    progress_logger.debug(f"✅ Video {i} passed all validation checks ⏱️ {step_time:.3f}s")
                     
-                    # Step 5: Social media link extraction (CRITICAL BOTTLENECK)
+                    # Step 8: Social media link extraction (NOW WITH FULL DESCRIPTIONS)
                     step_start = time.time()
-                    progress_logger.debug(f"🔍 Video {i} extracting social links from description...")
+                    progress_logger.debug(f"🔍 Video {i} extracting social links from full description ({len(description)} chars)...")
                     
                     raw_social_links = self._extract_social_links_from_description(description)
                     social_links = await self._clean_social_links(raw_social_links) if raw_social_links else None
@@ -337,12 +389,12 @@ class MasterDiscoveryAgent:
                         except Exception as e:
                             progress_logger.debug(f"⚠️ Video {i} channel social link extraction failed: {e}")
                     
-                    # Final check: Must have at least one of the required social platforms
+                    # Final check: STRICT social media requirement
                     if not has_required_social:
                         step_time = time.time() - step_start
-                        progress_logger.debug(f"❌ Video {i} failed social requirement - no Spotify/Instagram/TikTok links ⏱️ {step_time:.3f}s")
+                        progress_logger.debug(f"❌ Video {i} REJECTED - no required social links (Instagram, TikTok, Spotify) ⏱️ {step_time:.3f}s")
                         stats['failed_social_requirement'] += 1
-                        continue
+                        continue  # Skip videos without required social links
                     
                     step_time = time.time() - step_start
                     
@@ -447,18 +499,79 @@ class MasterDiscoveryAgent:
             
             enriched_data = await self.enrichment_agent.enrich_artist(artist_profile)
             
+            # Step 3.5: Enhanced social media discovery if initial enrichment failed
+            if (not enriched_data.profile.social_links.get('instagram') and 
+                not enriched_data.profile.social_links.get('tiktok') and
+                video_data.get('url')):
+                logger.info(f"🔍 Initial enrichment found limited social links, trying enhanced discovery for: {artist_name}")
+                try:
+                    from app.agents.crawl4ai_agent import Crawl4AIAgent
+                    enhanced_agent = Crawl4AIAgent()
+                    enhanced_results = await enhanced_agent.discover_artist_social_profiles(artist_name, video_data['url'])
+                    
+                    # Merge enhanced results with existing data
+                    for platform, url in enhanced_results.get('profiles', {}).items():
+                        if url and not enriched_data.profile.social_links.get(platform):
+                            enriched_data.profile.social_links[platform] = url
+                            logger.info(f"✅ Enhanced discovery found {platform}: {url}")
+                            
+                except Exception as e:
+                    logger.warning(f"⚠️ Enhanced social media discovery failed: {e}")
+            
             # Step 4: Spotify API integration for additional data
             spotify_api_data = await self._get_spotify_api_data(artist_profile.name)
             
-            # Step 5: Calculate sophisticated discovery score
+            # Step 4.5: Merge Spotify API data into enriched_data
+            if spotify_api_data:
+                # Merge avatar URL if not already present
+                if spotify_api_data.get('avatar_url') and not enriched_data.profile.avatar_url:
+                    enriched_data.profile.avatar_url = spotify_api_data['avatar_url']
+                    logger.info(f"✅ Added Spotify avatar URL: {spotify_api_data['avatar_url']}")
+                
+                # Merge genres if not already present or if Spotify has more genres
+                if spotify_api_data.get('genres'):
+                    if not enriched_data.profile.genres:
+                        enriched_data.profile.genres = spotify_api_data['genres']
+                        logger.info(f"✅ Added Spotify genres: {spotify_api_data['genres']}")
+                    else:
+                        # Merge unique genres from both sources
+                        current_genres = set(enriched_data.profile.genres)
+                        spotify_genres = set(spotify_api_data['genres'])
+                        merged_genres = list(current_genres.union(spotify_genres))
+                        enriched_data.profile.genres = merged_genres
+                        logger.info(f"✅ Merged genres - Total: {len(merged_genres)}, Added from Spotify: {list(spotify_genres - current_genres)}")
+                
+                # Store Spotify API data in metadata for database storage
+                if not enriched_data.profile.metadata:
+                    enriched_data.profile.metadata = {}
+                enriched_data.profile.metadata['spotify_api_data'] = {
+                    'followers': spotify_api_data.get('followers', 0),
+                    'popularity': spotify_api_data.get('popularity', 0),
+                    'top_tracks': spotify_api_data.get('top_tracks', [])
+                }
+                logger.info(f"✅ Stored Spotify API metadata: {spotify_api_data.get('followers', 0)} followers, popularity {spotify_api_data.get('popularity', 0)}")
+            
+            # Step 5: Extract lyrics and analyze themes
+            top_tracks = []
+            if hasattr(enriched_data, 'profile') and hasattr(enriched_data.profile, 'metadata'):
+                top_tracks = enriched_data.profile.metadata.get('top_tracks', [])
+            
+            lyrics_data = {}
+            lyrical_analysis = ""
+            if top_tracks:
+                lyrics_data = await self._extract_lyrics_from_musixmatch(artist_profile.name, top_tracks)
+                if lyrics_data:
+                    lyrical_analysis = await self._analyze_lyrics_with_deepseek(lyrics_data, artist_profile.name)
+            
+            # Step 6: Calculate sophisticated discovery score
             discovery_score = self._calculate_discovery_score(
                 youtube_data, enriched_data, spotify_api_data
             )
             
-            # Step 6: Store in database
+            # Step 7: Store in database
             artist_record = await self._store_artist_in_database(
                 deps, artist_profile, enriched_data, youtube_data, 
-                spotify_api_data, discovery_score
+                spotify_api_data, discovery_score, lyrical_analysis
             )
             
             if artist_record:
@@ -486,28 +599,54 @@ class MasterDiscoveryAgent:
         if not title:
             return None
         
-        # Common patterns for music video titles
+        # Log the title being processed for debugging
+        logger.debug(f"🎯 Extracting artist from title: '{title}'")
+        
+        # Common patterns for music video titles (ordered by specificity)
         patterns = [
+            # Official video patterns
             r'^([^-]+?)\s*-\s*[^-]+?\s*\(Official\s*(?:Music\s*)?Video\)',  # Artist - Song (Official Video)
             r'^([^-]+?)\s*-\s*[^-]+?\s*\[Official\s*(?:Music\s*)?Video\]',  # Artist - Song [Official Video]
+            r'^([^-]+?)\s*-\s*[^-]+?\s*\|\s*Official\s*(?:Music\s*)?Video',  # Artist - Song | Official Video
+            
+            # Comma separated patterns
+            r'^([^,]+?),\s*([^,]+?)\s*-\s*([^,\(]+)',  # Artist1, Artist2 - Song
+            
+            # Basic separator patterns
             r'^([^-]+?)\s*-\s*[^-]+$',  # Artist - Song
             r'^([^|]+?)\s*\|\s*[^|]+$',  # Artist | Song
             r'^([^:]+?):\s*[^:]+$',     # Artist: Song
+            
+            # Quote patterns
             r'^(.+?)\s*["\']([^"\']+)["\']',  # Artist "Song"
+            
+            # By patterns
             r'^(.+?)\s*(?:by|BY)\s+(.+?)(?:\s*\(|$)',  # Song by Artist
+            
+            # Parentheses patterns
+            r'^([^(]+?)\s*\([^)]*(?:official|music|video|mv)[^)]*\)',  # Artist (Official Video)
+            
+            # Last resort - take everything before common keywords
+            r'^([^(]+?)(?:\s*\((?:official|music|video|mv|lyric|audio))',  # Artist (keyword)
         ]
         
-        for pattern in patterns:
+        for i, pattern in enumerate(patterns):
             match = re.search(pattern, title.strip(), re.IGNORECASE)
             if match:
+                logger.debug(f"🎯 Pattern {i+1} matched: {pattern}")
                 # Try both groups for patterns with multiple captures
                 for group_idx in [1, 2]:
                     try:
                         artist_name = match.group(group_idx).strip()
+                        logger.debug(f"🎯 Extracted candidate: '{artist_name}' from group {group_idx}")
                         if artist_name and self._is_valid_artist_name(artist_name):
                             # Clean and remove featured artists
                             cleaned_name = self._clean_artist_name(artist_name)
-                            return self._remove_featured_artists(cleaned_name)
+                            final_name = self._remove_featured_artists(cleaned_name)
+                            logger.debug(f"✅ Final artist name: '{final_name}'")
+                            return final_name
+                        else:
+                            logger.debug(f"❌ Invalid artist name: '{artist_name}'")
                     except IndexError:
                         continue
         
@@ -602,14 +741,14 @@ class MasterDiscoveryAgent:
         """
         try:
             # First try exact match
-            exact_response = deps.supabase.table("artist").select("id").eq("name", artist_name).execute()
+            exact_response = deps.supabase.table("artists").select("id").eq("name", artist_name).execute()
             if len(exact_response.data) > 0:
                 logger.debug(f"Found exact match for artist: {artist_name}")
                 return True
             
             # Then try fuzzy match with cleaned names
             cleaned_name = self._clean_artist_name(artist_name).lower()
-            fuzzy_response = deps.supabase.table("artist").select("id", "name").execute()
+            fuzzy_response = deps.supabase.table("artists").select("id", "name").execute()
             
             for existing_artist in fuzzy_response.data:
                 existing_cleaned = self._clean_artist_name(existing_artist['name']).lower()
@@ -632,7 +771,7 @@ class MasterDiscoveryAgent:
             if not video_id:
                 return False
                 
-            response = deps.supabase.table("artist").select("id").eq("discovery_video_id", video_id).execute()
+            response = deps.supabase.table("artists").select("id").eq("discovery_video_id", video_id).execute()
             return len(response.data) > 0
             
         except Exception as e:
@@ -947,6 +1086,11 @@ class MasterDiscoveryAgent:
         for platform, url in social_links.items():
             profile.social_links[platform] = url
         
+        logger.info(f"🎯 Created artist profile for {artist_name} with social links: {list(social_links.keys())}")
+        if social_links:
+            for platform, url in social_links.items():
+                logger.info(f"   - {platform}: {url}")
+        
         return profile
     
     async def _crawl_youtube_channel(self, video_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -967,11 +1111,31 @@ class MasterDiscoveryAgent:
                 channel_id = video_data.get('channel_id')
                 
                 if not channel_name and not channel_id:
-                    logger.warning("No channel information available for crawling")
+                    logger.warning("⚠️ No channel information available for crawling")
                     return {}
+                
+                # Skip if channel name is "Unknown" - but only if we also don't have video URL for fallback
+                if channel_name == "Unknown" and not video_data.get('url'):
+                    logger.warning(f"⚠️ Channel name is 'Unknown' and no video URL - skipping channel crawl for artist: {video_data.get('extracted_artist_name', 'N/A')}")
+                    return {}
+                elif channel_name == "Unknown":
+                    logger.info(f"📺 Channel name unknown, but will try extracting from video URL for: {video_data.get('extracted_artist_name', 'N/A')}")
                 
                 # Build URLs based on available information
                 channel_urls = []
+                
+                # If channel name is "Unknown", try to extract channel from video URL using crawl4ai_agent
+                if channel_name == "Unknown" and video_data.get('url'):
+                    try:
+                        from app.agents.crawl4ai_agent import Crawl4AIAgent
+                        crawl4ai_agent = Crawl4AIAgent()
+                        extracted_channel = await crawl4ai_agent.extract_channel_from_video(video_data['url'])
+                        if extracted_channel:
+                            logger.info(f"✅ Extracted channel URL from video: {extracted_channel}")
+                            channel_urls = [extracted_channel]
+                            channel_url = extracted_channel
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to extract channel from video URL: {e}")
                 
                 if channel_id:
                     if channel_id.startswith('@'):
@@ -1009,6 +1173,7 @@ class MasterDiscoveryAgent:
             # Enhanced schema for YouTube channel extraction
             schema = {
                 "name": "YouTube Channel",
+                "baseSelector": "body",  # Add required baseSelector
                 "fields": [
                     {
                         "name": "subscriber_count_text",
@@ -1028,7 +1193,8 @@ class MasterDiscoveryAgent:
                     {
                         "name": "social_links",
                         "selector": "a[href*='instagram.com'], a[href*='twitter.com'], a[href*='tiktok.com'], a[href*='spotify.com'], a[href*='facebook.com']",
-                        "type": "list"
+                        "type": "list",
+                        "attribute": "href"
                     }
                 ]
             }
@@ -1073,22 +1239,33 @@ class MasterDiscoveryAgent:
                                     import json
                                     extracted = json.loads(result.extracted_content)
                                     
-                                    # Extract subscriber count
-                                    if extracted.get('subscriber_count_text'):
-                                        channel_data['subscriber_count'] = self._parse_subscriber_count(extracted['subscriber_count_text'])
+                                    # Handle case where extracted content is a list (take first item)
+                                    if isinstance(extracted, list):
+                                        if extracted:
+                                            extracted = extracted[0]
+                                        else:
+                                            extracted = {}
                                     
-                                    # Extract description
-                                    if extracted.get('channel_description'):
-                                        channel_data['channel_description'] = extracted['channel_description'][:500]
-                                    
-                                    # Extract social links
-                                    if extracted.get('social_links'):
-                                        social_links = self._extract_social_links_from_channel_links(extracted['social_links'])
-                                        channel_data['social_links_from_channel'] = social_links
-                                    
-                                    # Check verification
-                                    if extracted.get('verified_badge'):
-                                        channel_data['verified'] = True
+                                    # Ensure extracted is a dictionary
+                                    if isinstance(extracted, dict):
+                                        # Extract subscriber count
+                                        if extracted.get('subscriber_count_text'):
+                                            channel_data['subscriber_count'] = self._parse_subscriber_count(extracted['subscriber_count_text'])
+                                        
+                                        # Extract description
+                                        if extracted.get('channel_description'):
+                                            channel_data['channel_description'] = extracted['channel_description'][:500]
+                                        
+                                        # Extract social links
+                                        if extracted.get('social_links'):
+                                            social_links = self._extract_social_links_from_channel_links(extracted['social_links'])
+                                            channel_data['social_links_from_channel'] = social_links
+                                        
+                                        # Check verification
+                                        if extracted.get('verified_badge'):
+                                            channel_data['verified'] = True
+                                    else:
+                                        logger.debug(f"Extracted content is not a dictionary: {type(extracted)}")
                                         
                                 except (json.JSONDecodeError, Exception) as e:
                                     logger.debug(f"Error parsing extracted content: {e}")
@@ -1134,15 +1311,110 @@ class MasterDiscoveryAgent:
             logger.error(f"❌ YouTube channel crawling error: {e}")
             return {}
     
-    async def _get_spotify_api_data(self, artist_name: str) -> Dict[str, Any]:
+    async def _get_full_video_description(self, video_url: str) -> Optional[Dict[str, Any]]:
         """
-        Get additional data from official Spotify API.
+        Crawl individual YouTube video page to get full description and metadata.
+        
+        Args:
+            video_url: YouTube video URL
+            
+        Returns:
+            Dict with video data including full description
         """
         try:
-            # This would use the official Spotify API for avatar, genres, etc.
-            # For now, return empty dict - would need to implement Spotify API client
+            logger.debug(f"🎬 Crawling full video data: {video_url}")
+            
+            from app.agents.crawl4ai_agent import Crawl4AIAgent
+            
+            # Initialize crawl4ai agent
+            crawl_agent = Crawl4AIAgent()
+            
+            # Extract video data using enhanced extractors
+            try:
+                from enhanced_extractors import EnhancedYouTubeExtractor
+                
+                # Get the HTML content
+                result = await crawl_agent.crawl_url(video_url)
+                if not result or not result.get('success'):
+                    logger.debug(f"⚠️ Failed to crawl video page: {video_url}")
+                    return None
+                
+                html_content = result.get('html', '')
+                if not html_content:
+                    logger.debug(f"⚠️ No HTML content from video page: {video_url}")
+                    return None
+                
+                # Extract video data using enhanced extractor
+                video_data = EnhancedYouTubeExtractor.extract_video_data(html_content)
+                
+                if video_data and video_data.get('description'):
+                    logger.debug(f"✅ Successfully extracted full video data ({len(video_data['description'])} chars description)")
+                    return video_data
+                else:
+                    logger.debug(f"⚠️ No description found in video data")
+                    return None
+                    
+            except ImportError:
+                logger.debug("⚠️ Enhanced extractors not available, using basic crawling")
+                # Fallback to basic crawling
+                result = await crawl_agent.crawl_url(video_url)
+                if result and result.get('success'):
+                    # Try to extract description from HTML
+                    html_content = result.get('html', '')
+                    if html_content:
+                        # Basic regex extraction for description
+                        import re
+                        desc_patterns = [
+                            r'"description":{"simpleText":"([^"]+)"',
+                            r'"description":"([^"]+)"',
+                            r'<meta name="description" content="([^"]+)"',
+                            r'<meta property="og:description" content="([^"]+)"'
+                        ]
+                        
+                        for pattern in desc_patterns:
+                            match = re.search(pattern, html_content)
+                            if match:
+                                description = match.group(1)
+                                if len(description) > 50:  # Ensure we got substantial content
+                                    return {'description': description}
+                
+                return None
+                
+        except Exception as e:
+            logger.debug(f"⚠️ Error crawling full video description: {e}")
+            return None
+    
+    async def _get_spotify_api_data(self, artist_name: str) -> Dict[str, Any]:
+        """
+        Get additional data from official Spotify API including avatar and genres.
+        """
+        try:
             logger.info(f"Getting Spotify API data for: {artist_name}")
-            return {}
+            
+            # Use the dedicated Spotify client
+            from app.clients.spotify_client import get_spotify_client
+            
+            spotify_client = get_spotify_client()
+            enriched_data = await spotify_client.get_enriched_artist_data(artist_name)
+            
+            if not enriched_data:
+                logger.info(f"No artist found on Spotify for: {artist_name}")
+                return {}
+            
+            # Convert to the expected format
+            spotify_data = {
+                'spotify_id': enriched_data.get('spotify_id'),
+                'spotify_url': enriched_data.get('external_urls', {}).get('spotify'),
+                'avatar_url': enriched_data.get('avatar_url'),
+                'genres': enriched_data.get('genres', []),
+                'followers': enriched_data.get('followers', 0),
+                'popularity': enriched_data.get('popularity', 0),
+                'name_match': enriched_data.get('name', '').lower() == artist_name.lower(),
+                'top_tracks': enriched_data.get('top_tracks', [])
+            }
+            
+            logger.info(f"✅ Retrieved Spotify API data for {artist_name}: {spotify_data['followers']:,} followers, {len(spotify_data['genres'])} genres")
+            return spotify_data
             
         except Exception as e:
             logger.error(f"Error getting Spotify API data: {e}")
@@ -1155,75 +1427,205 @@ class MasterDiscoveryAgent:
         spotify_api_data: Dict[str, Any]
     ) -> int:
         """
-        Calculate sophisticated discovery score (0-100) with consistency checks.
+        Calculate sophisticated discovery score (0-100) representing artist's career progression.
+        
+        Score components:
+        - YouTube: 25 points (subscribers, engagement)
+        - Spotify: 25 points (monthly listeners, popularity) 
+        - Instagram: 20 points (followers, engagement rate)
+        - TikTok: 15 points (followers, likes ratio)
+        - Growth Trajectory: 10 points (growth patterns, potential)
+        - Artificial Inflation Detection: -20 points penalty
+        
+        Score ranges:
+        - 0-20: Emerging talent (just starting)
+        - 21-40: Developing artist (building audience)
+        - 41-60: Growing artist (steady momentum) 
+        - 61-80: Established indie artist (strong following)
+        - 81-100: Viral/breakthrough potential (high momentum)
         """
         score = 0
         
         try:
-            # Extract metrics from enriched data - fix the data access pattern
-            spotify_listeners = enriched_data.profile.follower_counts.get('spotify_monthly_listeners', 0) or 0
-            instagram_followers = enriched_data.profile.follower_counts.get('instagram', 0) or 0
-            tiktok_followers = enriched_data.profile.follower_counts.get('tiktok', 0) or 0
-            tiktok_likes = enriched_data.profile.metadata.get('tiktok_likes', 0) or 0
-            youtube_subscribers = youtube_data.get('subscriber_count', 0)
+            # Extract metrics safely
+            spotify_listeners = 0
+            instagram_followers = 0
+            tiktok_followers = 0
+            tiktok_likes = 0
             
-            # YouTube metrics (30 points max)
-            if youtube_subscribers > 1000000:
-                score += 30
-            elif youtube_subscribers > 100000:
-                score += 25
-            elif youtube_subscribers > 10000:
-                score += 20
-            elif youtube_subscribers > 1000:
-                score += 15
-            elif youtube_subscribers > 100:
-                score += 10
+            # Handle different enriched_data structures
+            if hasattr(enriched_data, 'profile'):
+                if hasattr(enriched_data.profile, 'follower_counts'):
+                    spotify_listeners = enriched_data.profile.follower_counts.get('spotify_monthly_listeners', 0) or 0
+                    instagram_followers = enriched_data.profile.follower_counts.get('instagram', 0) or 0
+                    tiktok_followers = enriched_data.profile.follower_counts.get('tiktok', 0) or 0
+                
+                if hasattr(enriched_data.profile, 'metadata'):
+                    tiktok_likes = enriched_data.profile.metadata.get('tiktok_likes', 0) or 0
             
-            # Spotify metrics (25 points max)
-            if spotify_listeners > 1000000:
-                score += 25
-            elif spotify_listeners > 100000:
-                score += 20
-            elif spotify_listeners > 10000:
-                score += 15
-            elif spotify_listeners > 1000:
-                score += 10
-            elif spotify_listeners > 100:
-                score += 5
+            youtube_subscribers = youtube_data.get('subscriber_count', 0) or 0
             
-            # Instagram metrics (20 points max)
-            if instagram_followers > 1000000:
-                score += 20
-            elif instagram_followers > 100000:
-                score += 15
-            elif instagram_followers > 10000:
-                score += 10
-            elif instagram_followers > 1000:
-                score += 5
+            # Spotify API data (takes precedence over scraped data)
+            if spotify_api_data:
+                api_followers = spotify_api_data.get('followers', 0)
+                if api_followers > spotify_listeners:
+                    spotify_listeners = api_followers
             
-            # TikTok metrics (15 points max)
-            if tiktok_followers > 1000000:
-                score += 15
-            elif tiktok_followers > 100000:
-                score += 12
-            elif tiktok_followers > 10000:
-                score += 8
-            elif tiktok_followers > 1000:
-                score += 5
+            # YouTube scoring (25 points max) - Lower thresholds for undiscovered talent
+            youtube_score = 0
+            if youtube_subscribers >= 50000:
+                youtube_score = 25  # Max score for this range
+            elif youtube_subscribers >= 25000:
+                youtube_score = 22
+            elif youtube_subscribers >= 10000:
+                youtube_score = 18
+            elif youtube_subscribers >= 5000:
+                youtube_score = 15
+            elif youtube_subscribers >= 1000:
+                youtube_score = 12
+            elif youtube_subscribers >= 500:
+                youtube_score = 8
+            elif youtube_subscribers >= 100:
+                youtube_score = 5
+            elif youtube_subscribers >= 50:
+                youtube_score = 3
+            elif youtube_subscribers > 0:
+                youtube_score = 1
             
-            # Consistency check and artificial inflation detection (10 points max deduction)
+            score += youtube_score
+            
+            # Spotify scoring (25 points max) - Adjusted for monthly listeners
+            spotify_score = 0
+            if spotify_listeners >= 100000:
+                spotify_score = 25
+            elif spotify_listeners >= 50000:
+                spotify_score = 22
+            elif spotify_listeners >= 25000:
+                spotify_score = 18
+            elif spotify_listeners >= 10000:
+                spotify_score = 15
+            elif spotify_listeners >= 5000:
+                spotify_score = 12
+            elif spotify_listeners >= 1000:
+                spotify_score = 8
+            elif spotify_listeners >= 500:
+                spotify_score = 5
+            elif spotify_listeners >= 100:
+                spotify_score = 3
+            elif spotify_listeners > 0:
+                spotify_score = 1
+            
+            score += spotify_score
+            
+            # Instagram scoring (20 points max)
+            instagram_score = 0
+            if instagram_followers >= 100000:
+                instagram_score = 20
+            elif instagram_followers >= 50000:
+                instagram_score = 17
+            elif instagram_followers >= 25000:
+                instagram_score = 14
+            elif instagram_followers >= 10000:
+                instagram_score = 12
+            elif instagram_followers >= 5000:
+                instagram_score = 9
+            elif instagram_followers >= 1000:
+                instagram_score = 6
+            elif instagram_followers >= 500:
+                instagram_score = 4
+            elif instagram_followers >= 100:
+                instagram_score = 2
+            elif instagram_followers > 0:
+                instagram_score = 1
+            
+            score += instagram_score
+            
+            # TikTok scoring (15 points max) - Includes engagement factor
+            tiktok_score = 0
+            if tiktok_followers >= 100000:
+                tiktok_score = 15
+            elif tiktok_followers >= 50000:
+                tiktok_score = 13
+            elif tiktok_followers >= 25000:
+                tiktok_score = 11
+            elif tiktok_followers >= 10000:
+                tiktok_score = 9
+            elif tiktok_followers >= 5000:
+                tiktok_score = 7
+            elif tiktok_followers >= 1000:
+                tiktok_score = 5
+            elif tiktok_followers >= 500:
+                tiktok_score = 3
+            elif tiktok_followers >= 100:
+                tiktok_score = 2
+            elif tiktok_followers > 0:
+                tiktok_score = 1
+            
+            # TikTok engagement bonus
+            if tiktok_followers > 0 and tiktok_likes > 0:
+                likes_per_follower = tiktok_likes / tiktok_followers
+                if likes_per_follower > 10:  # High engagement
+                    tiktok_score = min(tiktok_score + 2, 15)
+                elif likes_per_follower > 5:  # Good engagement
+                    tiktok_score = min(tiktok_score + 1, 15)
+            
+            score += tiktok_score
+            
+            # Growth trajectory and potential (10 points max)
+            growth_score = 0
+            
+            # Multi-platform presence bonus
+            platforms_with_following = sum([
+                1 if youtube_subscribers > 0 else 0,
+                1 if spotify_listeners > 0 else 0,
+                1 if instagram_followers > 0 else 0,
+                1 if tiktok_followers > 0 else 0
+            ])
+            
+            if platforms_with_following >= 4:
+                growth_score += 4
+            elif platforms_with_following >= 3:
+                growth_score += 3
+            elif platforms_with_following >= 2:
+                growth_score += 2
+            elif platforms_with_following >= 1:
+                growth_score += 1
+            
+            # Content quality indicators
+            if hasattr(enriched_data, 'profile') and hasattr(enriched_data.profile, 'metadata'):
+                if enriched_data.profile.metadata.get('top_tracks'):
+                    growth_score += 2  # Has released music
+                if enriched_data.profile.metadata.get('lyrics_themes'):
+                    growth_score += 2  # Quality lyrical content
+            
+            # Spotify popularity bonus (from API)
+            if spotify_api_data.get('popularity', 0) > 30:
+                growth_score += 2
+            
+            score += min(growth_score, 10)
+            
+            # Artificial inflation detection (-20 points max penalty)
             artificial_inflation_penalty = self._detect_artificial_inflation(
                 spotify_listeners, instagram_followers, tiktok_followers, youtube_subscribers
             )
             score -= artificial_inflation_penalty
             
-            # Content quality bonus (10 points max)
-            if enriched_data.profile.metadata.get('lyrics_themes'):
-                score += 5
-            if enriched_data.profile.metadata.get('top_tracks'):
-                score += 5
+            # Undiscovered talent bonus (5 points) - Artists with good content but low overall reach
+            if score < 30 and platforms_with_following >= 2:
+                score += 5  # Bonus for multi-platform emerging artists
             
-            return max(0, min(score, 100))  # Clamp between 0 and 100
+            final_score = max(0, min(score, 100))  # Clamp between 0 and 100
+            
+            logger.info(f"📊 Discovery Score Breakdown:")
+            logger.info(f"   YouTube ({youtube_subscribers:,} subs): {youtube_score}/25")
+            logger.info(f"   Spotify ({spotify_listeners:,} listeners): {spotify_score}/25") 
+            logger.info(f"   Instagram ({instagram_followers:,} followers): {instagram_score}/20")
+            logger.info(f"   TikTok ({tiktok_followers:,} followers): {tiktok_score}/15")
+            logger.info(f"   Growth/Quality: {min(growth_score, 10)}/10")
+            logger.info(f"   Inflation Penalty: -{artificial_inflation_penalty}")
+            logger.info(f"   🎯 FINAL SCORE: {final_score}/100")
+            
+            return final_score
             
         except Exception as e:
             logger.error(f"Error calculating discovery score: {e}")
@@ -1291,7 +1693,8 @@ class MasterDiscoveryAgent:
         enriched_data: Any,
         youtube_data: Dict[str, Any],
         spotify_api_data: Dict[str, Any],
-        discovery_score: int
+        discovery_score: int,
+        lyrical_analysis: str = ""
     ) -> Optional[Dict[str, Any]]:
         """
         Store complete artist data in Supabase database.
@@ -1322,7 +1725,12 @@ class MasterDiscoveryAgent:
                 'facebook_url': enriched_data.profile.social_links.get('facebook') or artist_profile.social_links.get('facebook'),
                 'website_url': enriched_data.profile.social_links.get('website') or artist_profile.social_links.get('website'),
                 # Music analysis
-                'music_theme_analysis': enriched_data.profile.metadata.get('lyrics_themes', ''),
+                'music_theme_analysis': lyrical_analysis or enriched_data.profile.metadata.get('lyrics_themes', ''),
+                # Spotify API data
+                'avatar_url': spotify_api_data.get('avatar_url'),
+                'spotify_popularity_score': spotify_api_data.get('popularity', 0),
+                'spotify_followers': spotify_api_data.get('followers', 0),
+                # Discovery metadata
                 'discovery_source': 'youtube',
                 'discovery_video_id': artist_profile.metadata.get('discovery_video', {}).get('video_id'),
                 'discovery_video_title': artist_profile.metadata.get('discovery_video', {}).get('title'),
@@ -1332,7 +1740,7 @@ class MasterDiscoveryAgent:
             }
             
             # Insert into database
-            response = deps.supabase.table("artist").insert(artist_data).execute()
+            response = deps.supabase.table("artists").insert(artist_data).execute()
             
             if response.data:
                 artist_record = response.data[0]
@@ -1371,11 +1779,6 @@ class MasterDiscoveryAgent:
         except:
             return None
     
-    def _extract_channel_id(self, url: str) -> Optional[str]:
-        """Extract channel ID from YouTube URL - placeholder implementation."""
-        # This would need more sophisticated URL parsing
-        return None
-
     def _validate_title_contains_search_terms(self, title: str) -> bool:
         """
         Validate if the title appears to be a legitimate music video (less restrictive).
@@ -1733,4 +2136,245 @@ class MasterDiscoveryAgent:
         
         logger.debug(f"Extracted social links from channel HTML: {links}")
         return links
+    
+    def _validate_view_count(self, view_count: int) -> bool:
+        """
+        Validate that video has less than 50k views to find undiscovered talent.
+        """
+        try:
+            if view_count is None:
+                return True  # Allow if view count is unknown
+            
+            # Convert string view counts if needed
+            if isinstance(view_count, str):
+                # Handle formats like "1.2K", "45K", "1.5M"
+                view_count = view_count.lower().replace(',', '')
+                if 'k' in view_count:
+                    view_count = float(view_count.replace('k', '')) * 1000
+                elif 'm' in view_count:
+                    view_count = float(view_count.replace('m', '')) * 1000000
+                elif 'b' in view_count:
+                    view_count = float(view_count.replace('b', '')) * 1000000000
+                else:
+                    view_count = float(view_count)
+            
+            is_valid = view_count < self.max_view_count
+            if not is_valid:
+                logger.debug(f"View count {view_count:,} exceeds limit of {self.max_view_count:,}")
+            
+            return is_valid
+            
+        except Exception as e:
+            logger.warning(f"Error validating view count '{view_count}': {e}")
+            return True  # Allow if parsing fails
+    
+    def _validate_english_language(self, text: str) -> bool:
+        """
+        Validate that text contains only English characters.
+        """
+        if not text:
+            return False
+        
+        import re
+        
+        # Allow English letters, numbers, spaces, and common punctuation
+        english_pattern = re.compile(r'^[a-zA-Z0-9\s\-\.\,\!\?\(\)\[\]\&\'\"]+$')
+        
+        # Check if text matches English pattern
+        is_english = bool(english_pattern.match(text.strip()))
+        
+        if not is_english:
+            logger.debug(f"Text '{text}' contains non-English characters")
+        
+        return is_english
+    
+    def _is_well_known_artist(self, artist_name: str) -> bool:
+        """
+        Check if artist name matches well-known artists (indicates covers/AI content).
+        """
+        if not artist_name:
+            return False
+        
+        artist_lower = artist_name.lower().strip()
+        
+        # Check against well-known artists list
+        for known_artist in self.well_known_artists:
+            if known_artist in artist_lower:
+                logger.debug(f"Artist '{artist_name}' matches well-known artist '{known_artist}'")
+                return True
+        
+        return False
+    
+    async def _extract_lyrics_from_musixmatch(self, artist_name: str, song_titles: List[str]) -> Dict[str, str]:
+        """
+        Extract lyrics for the top 5 songs from Musixmatch.
+        """
+        lyrics_data = {}
+        
+        try:
+            from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+            
+            browser_config = BrowserConfig(
+                headless=True,
+                viewport_width=1920,
+                viewport_height=1080
+            )
+            
+            async with AsyncWebCrawler(config=browser_config) as crawler:
+                for song_item in song_titles[:5]:  # Top 5 songs only
+                    try:
+                        # Extract song title from dictionary or use as string
+                        if isinstance(song_item, dict):
+                            song_title = song_item.get('name', str(song_item))
+                        else:
+                            song_title = str(song_item)
+                        
+                        # Clean song title for URL
+                        clean_artist = artist_name.replace(' ', '-').replace('&', 'and')
+                        clean_song = song_title.replace(' ', '-').replace('&', 'and')
+                        
+                        # Build Musixmatch URL
+                        musixmatch_url = f"https://www.musixmatch.com/lyrics/{clean_artist}/{clean_song}"
+                        
+                        config = CrawlerRunConfig(
+                            css_selector='.lyrics__content__ok, .mxm-lyrics__content',
+                            word_count_threshold=50,
+                            extraction_strategy=None,
+                            wait_until="domcontentloaded",
+                            page_timeout=15000,
+                            delay_before_return_html=2.0,
+                            screenshot=False,
+                            pdf=False,
+                            verbose=False
+                        )
+                        
+                        result = await crawler.arun(
+                            url=musixmatch_url,
+                            config=config,
+                            session_id=f"musixmatch_{hash(artist_name + song_title)}"
+                        )
+                        
+                        if result.success and result.markdown:
+                            # Extract lyrics from markdown
+                            lyrics_text = self._clean_lyrics_text(result.markdown)
+                            if lyrics_text and len(lyrics_text) > 50:
+                                lyrics_data[song_title] = lyrics_text
+                                logger.info(f"✅ Extracted lyrics for '{song_title}' by {artist_name}")
+                            else:
+                                logger.warning(f"⚠️ No valid lyrics found for '{song_title}'")
+                        else:
+                            logger.warning(f"⚠️ Failed to scrape lyrics for '{song_title}': {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+                    
+                    except Exception as e:
+                        logger.error(f"Error extracting lyrics for '{song_title}': {e}")
+                        continue
+                    
+                    # Rate limiting
+                    await asyncio.sleep(1.0)
+            
+            logger.info(f"📝 Extracted lyrics for {len(lyrics_data)} songs by {artist_name}")
+            return lyrics_data
+            
+        except Exception as e:
+            logger.error(f"Error extracting lyrics from Musixmatch: {e}")
+            return {}
+    
+    def _clean_lyrics_text(self, raw_text: str) -> str:
+        """
+        Clean and format lyrics text extracted from Musixmatch.
+        """
+        if not raw_text:
+            return ""
+        
+        import re
+        
+        # Remove common Musixmatch elements
+        cleaned = re.sub(r'Musixmatch.*?lyrics', '', raw_text, flags=re.IGNORECASE)
+        cleaned = re.sub(r'You might also like.*?\n', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\[.*?\]', '', cleaned)  # Remove annotations like [Verse 1]
+        cleaned = re.sub(r'\(.*?\)', '', cleaned)  # Remove parenthetical notes
+        
+        # Clean up whitespace
+        cleaned = re.sub(r'\n\s*\n', '\n', cleaned)
+        cleaned = cleaned.strip()
+        
+        return cleaned
+    
+    async def _analyze_lyrics_with_deepseek(self, lyrics_data: Dict[str, str], artist_name: str) -> str:
+        """
+        Analyze lyrics using DeepSeek to extract recurring themes and sentiment.
+        """
+        try:
+            if not lyrics_data:
+                return ""
+            
+            # Combine all lyrics
+            all_lyrics = "\n\n".join([f"Song: {title}\n{lyrics}" for title, lyrics in lyrics_data.items()])
+            
+            # Use existing AI cleaner if available
+            if self.ai_cleaner and self.ai_cleaner.is_available():
+                analysis_prompt = f"""
+                Analyze the following lyrics from {artist_name} and provide a one-sentence theme analysis:
+                
+                {all_lyrics}
+                
+                Please identify the main recurring themes, emotions, and overall sentiment in ONE SENTENCE.
+                Focus on: love, relationships, success, struggle, party, introspection, social issues, etc.
+                """
+                
+                try:
+                    # This would use the existing AI cleaner infrastructure
+                    # For now, return a simple analysis based on keyword frequency
+                    return self._simple_lyrics_analysis(all_lyrics)
+                except Exception as e:
+                    logger.warning(f"DeepSeek analysis failed: {e}")
+                    return self._simple_lyrics_analysis(all_lyrics)
+            else:
+                return self._simple_lyrics_analysis(all_lyrics)
+                
+        except Exception as e:
+            logger.error(f"Error analyzing lyrics with DeepSeek: {e}")
+            return ""
+    
+    def _simple_lyrics_analysis(self, lyrics_text: str) -> str:
+        """
+        Simple keyword-based lyrics analysis as fallback.
+        """
+        if not lyrics_text:
+            return ""
+        
+        lyrics_lower = lyrics_text.lower()
+        
+        # Theme keywords
+        themes = {
+            'love_relationships': ['love', 'heart', 'baby', 'girl', 'boy', 'kiss', 'romance', 'together'],
+            'success_money': ['money', 'cash', 'rich', 'success', 'win', 'gold', 'diamond', 'fame'],
+            'party_lifestyle': ['party', 'dance', 'club', 'night', 'drink', 'fun', 'celebrate'],
+            'struggle_hardship': ['struggle', 'pain', 'hard', 'fight', 'difficult', 'broke', 'stress'],
+            'introspective': ['think', 'feel', 'mind', 'soul', 'memory', 'dream', 'hope'],
+            'social_issues': ['world', 'people', 'society', 'change', 'justice', 'freedom', 'peace']
+        }
+        
+        theme_scores = {}
+        for theme, keywords in themes.items():
+            score = sum(lyrics_lower.count(keyword) for keyword in keywords)
+            if score > 0:
+                theme_scores[theme] = score
+        
+        if not theme_scores:
+            return "Mixed themes and personal expression"
+        
+        # Get top theme
+        top_theme = max(theme_scores, key=theme_scores.get)
+        
+        theme_descriptions = {
+            'love_relationships': 'Focuses on love, relationships, and romantic connections',
+            'success_money': 'Emphasizes success, wealth, and material achievement',
+            'party_lifestyle': 'Centers around party culture, nightlife, and celebration',
+            'struggle_hardship': 'Explores personal struggles, hardships, and overcoming challenges',
+            'introspective': 'Reflects on personal thoughts, emotions, and inner experiences',
+            'social_issues': 'Addresses social themes, community, and broader world issues'
+        }
+        
+        return theme_descriptions.get(top_theme, "Mixed themes and personal expression")
  

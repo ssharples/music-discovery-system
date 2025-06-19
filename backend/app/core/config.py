@@ -30,7 +30,8 @@ class Settings(BaseSettings):
     
     # Supabase (optional for basic deployment)
     SUPABASE_URL: str = Field("", env="SUPABASE_URL")
-    SUPABASE_KEY: str = Field("", env="SUPABASE_KEY")
+    SUPABASE_KEY: str = Field("", env="SUPABASE_ANON_KEY")  # Use SUPABASE_ANON_KEY as primary
+    SUPABASE_ANON_KEY: str = Field("", env="SUPABASE_ANON_KEY")  # Keep both for compatibility
     SUPABASE_SERVICE_ROLE_KEY: str = Field("", env="SUPABASE_SERVICE_ROLE_KEY")
     
     # Redis
@@ -79,7 +80,6 @@ class Settings(BaseSettings):
         return v
     
     # Additional fields for music discovery system
-    SUPABASE_ANON_KEY: str = Field("", env="SUPABASE_ANON_KEY")
     LOG_LEVEL: str = Field("INFO", env="LOG_LEVEL")
     CRAWL4AI_CACHE_DIR: str = Field("./cache", env="CRAWL4AI_CACHE_DIR")
     USER_AGENT_MODE: str = Field("random", env="USER_AGENT_MODE")
@@ -114,7 +114,8 @@ class Settings(BaseSettings):
     
     def is_supabase_configured(self) -> bool:
         """Check if Supabase is properly configured"""
-        return bool(self.SUPABASE_URL and self.SUPABASE_KEY)
+        # Check for either SUPABASE_KEY or SUPABASE_ANON_KEY
+        return bool(self.SUPABASE_URL and (self.SUPABASE_KEY or self.SUPABASE_ANON_KEY))
     
     def is_youtube_configured(self) -> bool:
         """Check if YouTube API is properly configured"""

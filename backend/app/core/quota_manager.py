@@ -16,16 +16,6 @@ class QuotaManager:
     """Advanced quota management with per-operation cost tracking and caching"""
     
     # API operation costs
-    YOUTUBE_COSTS = {
-        'search': 100,
-        'videos': 1,
-        'channels': 1,
-        'captions': 50,
-        'comments': 1,
-        'channel_videos': 1,
-        'video_details': 1
-    }
-    
     SPOTIFY_COSTS = {
         'search': 1,
         'artist_details': 1,

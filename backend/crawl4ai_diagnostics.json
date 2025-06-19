@@ -1,0 +1,46 @@
+{
+  "youtube_video": {
+    "url": "https://www.youtube.com/watch?v=Tullamarine",
+    "title": "YouTube",
+    "channel_name": "",
+    "channel_url": "",
+    "description": "",
+    "view_count": "",
+    "duration": "",
+    "html_length": 904798,
+    "markdown_length": 3880
+  },
+  "spotify_artist": {
+    "url": "https://open.spotify.com/artist/4XD21vbRKQgevcDpWaDRw5",
+    "artist_name": "The Tullamarines",
+    "monthly_listeners": "",
+    "followers": "",
+    "biography": "The Tullamarines on Spotify. Artist \u00b7 46.9K monthly listeners.",
+    "top_tracks": [],
+    "genres": [],
+    "html_length": 15671,
+    "markdown_length": 1
+  },
+  "musixmatch_lyrics": {
+    "url": "https://musixmatch.com/lyrics/the-tullamarines/lying",
+    "song_title": "",
+    "artist_name": "",
+    "lyrics": "",
+    "html_length": 163097,
+    "markdown_length": 5007,
+    "contains_lyrics_class": false,
+    "contains_mxm_track": false
+  },
+  "youtube_search": {
+    "url": "https://www.youtube.com/results?search_query=indie+rock+official+music+video&sp=CAISCAgCEAEYAXAB&gl=US&hl=en",
+    "videos_found": [],
+    "html_length": 1088255,
+    "markdown_length": 10042,
+    "video_containers": {
+      "ytd-video-renderer": 203,
+      "video-renderer": 180,
+      "watch-urls": 10,
+      "video-titles": 12
+    }
+  }
+}

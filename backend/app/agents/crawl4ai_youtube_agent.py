@@ -73,7 +73,15 @@ class Crawl4AIYouTubeAgent:
                 'a[href*="/channel/"]',
                 'a[href*="/@"]',
                 '[data-testid="channel-name"]',
-                'yt-formatted-string.ytd-channel-name'
+                'yt-formatted-string.ytd-channel-name',
+                # Updated selectors for current YouTube structure
+                'ytd-video-owner-renderer a',
+                'ytd-channel-name-container a',
+                '.ytd-video-owner-renderer yt-formatted-string',
+                '#owner-text a',
+                'a.yt-simple-endpoint[href*="/@"]',
+                'a.yt-simple-endpoint[href*="/channel/"]',
+                'span.ytd-channel-name yt-formatted-string'
             ],
             'views': [
                 '#metadata-line span:first-child',
@@ -467,6 +475,10 @@ class Crawl4AIYouTubeAgent:
             # Magic mode for automatic anti-bot handling
             magic=True,
             
+            # Full page scanning for maximum video discovery
+            scan_full_page=True,
+            scroll_delay=0.2,  # 200ms between scrolls for optimal performance
+            
             # Identity settings
             locale=locale_config["locale"],
             timezone_id=locale_config["timezone"],
@@ -477,13 +489,12 @@ class Crawl4AIYouTubeAgent:
             override_navigator=True,
             remove_overlay_elements=True,
             
-            # Timing randomization
-            delay_before_return_html=random.uniform(2.0, 5.0),
-            scroll_delay=random.uniform(0.5, 1.5),
+            # Timing optimized for full page scanning
+            delay_before_return_html=random.uniform(8.0, 12.0),  # More time for content loading
             
             # Wait strategies
             wait_until="domcontentloaded",  # More reliable than networkidle
-            page_timeout=60000,  # Reduced timeout
+            page_timeout=180000,  # Increased to 3 minutes for full page scanning
             wait_for=None,  # Remove wait_for to avoid timeout issues
             
             # Content settings
@@ -565,8 +576,10 @@ class Crawl4AIYouTubeAgent:
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
                 wait_until="domcontentloaded",
-                page_timeout=15000,  # Reduced from 30s
-                delay_before_return_html=2.0,
+                page_timeout=30000,  # Increased for full page scanning
+                delay_before_return_html=3.0,
+                scan_full_page=True,   # Enable full page scrolling
+                scroll_delay=0.2,      # 200ms between scrolls
                 verbose=True
             )
             
@@ -620,13 +633,17 @@ class Crawl4AIYouTubeAgent:
             # Ensure magic mode is enabled
             crawler_config.magic = True
             
+            # Enable full page scanning with optimized scrolling
+            crawler_config.scan_full_page = True
+            crawler_config.scroll_delay = 0.2  # 200ms between scrolls
+            
             # Use advanced infinite scroll JavaScript
             advanced_scroll_js = self.get_advanced_infinite_scroll_js(target_videos=max_results)
             crawler_config.js_code = advanced_scroll_js
             
             # Increase timeouts for infinite scroll
-            crawler_config.page_timeout = 60000  # 1 minute for scrolling
-            crawler_config.delay_before_return_html = 8.0  # More time for content to load
+            crawler_config.page_timeout = 120000  # 2 minutes for full page scanning
+            crawler_config.delay_before_return_html = 10.0  # More time for content to load
             
             search_url = self._build_search_url(query, upload_date)
             logger.info(f"🔍 Magic mode search URL: {search_url}")
@@ -840,7 +857,65 @@ class Crawl4AIYouTubeAgent:
         return base_url
 
     async def _extract_videos_from_html(self, html: str, max_results: int, mobile: bool = False) -> List[YouTubeVideo]:
-        """Extract video information from HTML using multiple selector strategies."""
+        """Extract video information from HTML using enhanced extractors."""
+        videos = []
+        
+        try:
+            # Use enhanced extractor first
+            from enhanced_extractors import EnhancedYouTubeExtractor
+            video_data_list = EnhancedYouTubeExtractor.extract_search_videos(html, max_results)
+            
+            # Convert to YouTubeVideo objects
+            for video_data in video_data_list:
+                try:
+                    video = YouTubeVideo(
+                        title=video_data.get("title", ""),
+                        url=video_data.get("url", ""),
+                        channel_name=video_data.get("channel_name", "Unknown"),
+                        channel_url=video_data.get("channel_url", ""),
+                        duration=video_data.get("duration", ""),
+                        view_count=video_data.get("view_count", ""),
+                        upload_date=video_data.get("upload_date", ""),
+                        description=video_data.get("description", ""),
+                        video_id=video_data.get("video_id", "")
+                    )
+                    
+                    if video.title and video.url:
+                        videos.append(video)
+                        if len(videos) >= max_results:
+                            break
+                            
+                except Exception as e:
+                    logger.warning(f"Failed to create YouTubeVideo object: {e}")
+                    continue
+            
+            logger.info(f"✅ Enhanced extraction found {len(videos)} videos")
+            
+            # Fallback to original method if enhanced extraction fails
+            if len(videos) < 3:
+                logger.info("🔄 Falling back to original extraction method")
+                fallback_videos = await self._extract_videos_from_html_fallback(html, max_results, mobile)
+                videos.extend(fallback_videos)
+                
+                # Remove duplicates by URL
+                seen_urls = set()
+                unique_videos = []
+                for video in videos:
+                    if video.url not in seen_urls:
+                        seen_urls.add(video.url)
+                        unique_videos.append(video)
+                
+                videos = unique_videos[:max_results]
+            
+        except Exception as e:
+            logger.error(f"Error in enhanced video extraction: {e}")
+            # Fallback to original method
+            videos = await self._extract_videos_from_html_fallback(html, max_results, mobile)
+        
+        return videos
+
+    async def _extract_videos_from_html_fallback(self, html: str, max_results: int, mobile: bool = False) -> List[YouTubeVideo]:
+        """Fallback video extraction using original method."""
         videos = []
         
         try:
@@ -1072,13 +1147,23 @@ class Crawl4AIYouTubeAgent:
                     '.ytd-channel-name',
                     '[data-testid*="channel"]',
                     'span[class*="channel"]',
+                    # More aggressive selectors for current YouTube
+                    'ytd-video-owner-renderer yt-formatted-string',
+                    'ytd-channel-name yt-formatted-string',
+                    '#owner-text yt-formatted-string',
+                    'a[href*="/@"] yt-formatted-string',
+                    'a[href*="/channel/"] yt-formatted-string',
+                    '.ytd-video-meta-block a',
+                    'span[dir="auto"]',  # Many channel names are in auto-direction spans
                 ]
                 
                 for selector in channel_name_selectors:
                     channel_elem = container.select_one(selector)
                     if channel_elem:
                         channel_text = channel_elem.get_text(strip=True)
-                        if channel_text and len(channel_text) > 1:
+                        # More relaxed validation - just check it's not empty and not a common non-channel text
+                        if (channel_text and len(channel_text) > 1 and 
+                            channel_text.lower() not in ['views', 'view', 'subscribers', 'subscribe', 'ago', 'duration']):
                             channel_name = channel_text
                             break
             
@@ -1186,18 +1271,18 @@ class Crawl4AIYouTubeAgent:
             logger.info(f"🔍 Starting infinite scroll search: {search_url}")
             logger.info(f"🎯 Target: {target_videos} videos")
             
-            # Use Crawl4AI's built-in infinite scroll feature
+            # Use Crawl4AI's built-in infinite scroll feature with enhanced settings
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
                 wait_until="domcontentloaded",  # Faster than networkidle
-                page_timeout=120000,  # 2 minute timeout
-                delay_before_return_html=3.0,  # Brief wait after scrolling completes
+                page_timeout=300000,  # 5 minute timeout for extensive scrolling
+                delay_before_return_html=10.0,  # More time after scrolling completes
                 verbose=True,
                 simulate_user=True,
                 magic=True,
-                # Built-in infinite scroll support
+                # Enhanced infinite scroll support
                 scan_full_page=True,  # Enables automatic infinite scrolling
-                scroll_delay=0.5      # Wait 500ms between scrolls for content loading
+                scroll_delay=0.2      # Optimized 200ms between scrolls
             )
             
             async with AsyncWebCrawler(config=browser_config) as crawler:
@@ -1211,9 +1296,9 @@ class Crawl4AIYouTubeAgent:
                         success=False, error_message=f"Infinite scroll failed: {result.error_message}"
                     )
                 
-                # Extract all videos from the final HTML
+                # Extract all videos from the final HTML with higher multiplier for more results
                 logger.info("🎬 Extracting videos from scrolled content...")
-                all_videos = await self._extract_videos_from_html(result.html, target_videos * 10)
+                all_videos = await self._extract_videos_from_html(result.html, target_videos * 20)  # Increased multiplier
                 logger.info(f"📊 Successfully extracted {len(all_videos)} videos")
                 
                 # Remove duplicates using video_id and title

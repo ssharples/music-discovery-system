@@ -33,6 +33,7 @@ from pydantic_ai.providers.deepseek import DeepSeekProvider
 from app.models.artist import ArtistProfile, EnrichedArtistData
 from app.core.config import settings
 from app.agents.ai_data_cleaner import get_ai_cleaner
+from app.clients.spotify_client import get_spotify_client
 
 logger = logging.getLogger(__name__)
 
@@ -41,60 +42,52 @@ class Crawl4AIEnrichmentAgent:
     """Enhanced enrichment agent with LLM content filtering and advanced Crawl4AI features"""
     
     def __init__(self):
-        """Initialize the enhanced Crawl4AI enrichment agent"""
-        # Enhanced browser configurations
-        self.browser_config = BrowserConfig(
-            headless=True,
-            viewport_width=1920,
-            viewport_height=1080,
-            java_script_enabled=True,
-            ignore_https_errors=True
-        )
+        """Initialize the Crawl4AI enrichment agent with enhanced capabilities"""
+        logger.info("🚀 Initializing Crawl4AI Enrichment Agent...")
         
-        # Stealth browser config for anti-bot measures
-        self.stealth_config = BrowserConfig(
-            headless=True,
-            viewport_width=1920,
-            viewport_height=1080,
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+        # Load settings first to ensure environment variables are available
+        from app.core.config import settings
+        
+        # Browser configuration for Crawl4AI with enhanced anti-detection
+        self.browser_config = BrowserConfig(
+            headless=settings.CRAWL4AI_HEADLESS,
+            viewport_width=settings.CRAWL4AI_VIEWPORT_WIDTH,
+            viewport_height=settings.CRAWL4AI_VIEWPORT_HEIGHT,
+            user_agent_mode="random",
             extra_args=[
+                "--no-sandbox", 
+                "--disable-dev-shm-usage",
                 "--disable-blink-features=AutomationControlled",
                 "--disable-features=VizDisplayCompositor",
-                "--disable-dev-shm-usage",
-                "--no-sandbox",
-                "--disable-web-security"
+                "--disable-web-security",
+                "--disable-features=TranslateUI"
             ]
         )
         
-        # LLM configuration for content filtering (if available)
-        if LLM_FEATURES_AVAILABLE:
-            self.llm_config = LLMConfig(
-                provider="deepseek",
-                model="deepseek-chat",
-                api_key=settings.DEEPSEEK_API_KEY,
-                temperature=0.3,
-                max_tokens=1000
-            )
+        # Initialize AI cleaner
+        self.ai_cleaner = None
+        try:
+            if settings.DEEPSEEK_API_KEY:
+                from app.agents.ai_data_cleaner import AIDataCleaner
+                self.ai_cleaner = AIDataCleaner()  # No model parameter needed
+                logger.info("✅ AI data cleaner initialized with DeepSeek")
+            else:
+                logger.warning("⚠️ DEEPSEEK_API_KEY not found - AI cleaning disabled")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to initialize AI cleaner: {e}")
+            self.ai_cleaner = None
+        
+        # Initialize Spotify API client
+        self.spotify_client = get_spotify_client()
+        if settings.is_spotify_configured():
+            logger.info("✅ Spotify API client initialized")
         else:
-            self.llm_config = None
+            logger.warning("⚠️ Spotify API not configured - avatar and genre enrichment disabled")
         
-        # AI data cleaner for all extracted data
-        self.ai_cleaner = get_ai_cleaner()
+        # Initialize session storage for persistent login states
+        self.session_storage = {}
         
-        # DeepSeek agent for lyrics analysis
-        self.lyrics_analyzer = Agent(
-            model=OpenAIModel('deepseek-chat', provider=DeepSeekProvider()),
-            system_prompt="""You are a lyrics analyst. Analyze song lyrics and:
-            1. Identify recurring themes
-            2. Provide descriptive tags
-            3. Summarize in one sentence
-            Return a concise analysis focused on artistic themes."""
-        )
-        
-        if LLM_FEATURES_AVAILABLE:
-            logger.info("✅ Enhanced Crawl4AI Enrichment Agent initialized with LLM content filtering")
-        else:
-            logger.info("✅ Crawl4AI Enrichment Agent initialized (LLM features not available in this version)")
+        logger.info("✅ Crawl4AI Enrichment Agent initialized")
     
     async def create_spotify_content_filter(self):
         """Create LLM-based content filter for Spotify pages"""
@@ -263,9 +256,14 @@ class Crawl4AIEnrichmentAgent:
                 logger.info(f"🔍 No direct Spotify link, will search by artist name")
                 tasks.append(self._search_and_enrich_spotify(artist_profile.name, enriched_data))
         else:
-            logger.warning(f"⚠️ No social links provided for {artist_profile.name} - this should not happen with new filtering")
-            # Fallback to search (but this shouldn't happen with new filtering)
+            logger.info(f"🔍 No direct social links available for {artist_profile.name}, using search-based enrichment")
+            # Search-based enrichment (normal workflow for some artists)
             tasks.append(self._search_and_enrich_spotify(artist_profile.name, enriched_data))
+        
+        # Always add Spotify API enrichment for avatar and genres
+        if settings.is_spotify_configured():
+            logger.info(f"🎵 Adding Spotify API enrichment for avatar and genres")
+            tasks.append(self._enrich_spotify_api(artist_profile.name, enriched_data))
         
         logger.info(f"🚀 Running {len(tasks)} enrichment tasks in parallel")
         
@@ -284,7 +282,7 @@ class Crawl4AIEnrichmentAgent:
         return enriched_data
     
     async def _enrich_spotify(self, artist_profile: ArtistProfile, enriched_data: EnrichedArtistData):
-        """Enrich with Spotify data using LLM content filtering"""
+        """Enrich with comprehensive Spotify data including top tracks with play counts, monthly listeners, top city, biography, and social links"""
         try:
             spotify_url = artist_profile.spotify_url
             if not spotify_url and artist_profile.spotify_id:
@@ -294,7 +292,7 @@ class Crawl4AIEnrichmentAgent:
                 logger.warning("⚠️ No Spotify URL available for enrichment")
                 return
                 
-            logger.info(f"🎵 Crawling Spotify with LLM filtering: {spotify_url}")
+            logger.info(f"🎵 Enriching comprehensive Spotify data: {spotify_url}")
             
             # Create LLM content filter for Spotify (if available)
             content_filter = await self.create_spotify_content_filter()
@@ -307,18 +305,56 @@ class Crawl4AIEnrichmentAgent:
                     options={"ignore_links": False}
                 )
             
-            # Enhanced crawler config with optional LLM filtering
+            # Enhanced crawler config for comprehensive data extraction
             crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
                 wait_until="domcontentloaded",
-                page_timeout=20000,  # Increased timeout for LLM processing
-                delay_before_return_html=5.0,  # More time for content filtering
+                page_timeout=25000,  # Longer timeout for comprehensive extraction
+                delay_before_return_html=6.0,  # More time for dynamic content
                 js_code="""
-                // Wait for page load and scroll to load content
+                // Comprehensive Spotify content loading
+                console.log('Starting comprehensive Spotify data extraction...');
+                
+                // Wait for initial content
                 await new Promise(resolve => setTimeout(resolve, 3000));
-                window.scrollTo(0, 500);
+                
+                // Multiple scroll attempts to load all content
+                for (let i = 0; i < 3; i++) {
+                    window.scrollTo(0, document.body.scrollHeight / 3 * (i + 1));
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+                
+                // Try to expand track lists and show more content
+                const expandButtons = document.querySelectorAll([
+                    '[data-testid*="show"]',
+                    '.show-all',
+                    'button[class*="show"]',
+                    '[aria-label*="Show"]',
+                    '[data-testid="show-all-button"]',
+                    'button[contains(@class, "more")]'
+                ].join(', '));
+                
+                for (let button of expandButtons) {
+                    try {
+                        if (button.textContent.toLowerCase().includes('show') || 
+                            button.textContent.toLowerCase().includes('more') ||
+                            button.getAttribute('aria-label')?.toLowerCase().includes('show')) {
+                            button.click();
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                        }
+                    } catch (e) {
+                        console.log('Button click failed:', e);
+                    }
+                }
+                
+                // Wait for new content to load
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Final scroll to ensure all content is loaded
+                window.scrollTo(0, document.body.scrollHeight);
                 await new Promise(resolve => setTimeout(resolve, 1000));
-                console.log('Spotify artist page loaded');
+                
+                console.log('Comprehensive Spotify page processing complete');
                 """,
                 magic=True,  # Enable anti-bot features
                 simulate_user=True,
@@ -336,104 +372,141 @@ class Crawl4AIEnrichmentAgent:
                 )
                 
                 if result.success and result.html:
-                    # Use regex patterns to extract data - more reliable than selectors
-                    import re
+                    logger.info(f"✅ Successfully loaded Spotify page (HTML: {len(result.html)} chars)")
                     
-                    # Enhanced Spotify data extraction with comprehensive patterns
-                    
-                    # 1. Extract monthly listeners
-                    monthly_listeners = 0
-                    listener_patterns = [
-                        r'([\d,]+)\s*monthly\s*listeners?',  # "X monthly listeners"
-                        r'monthly\s*listeners?[:\s]*([\d,]+)',  # "monthly listeners: X"
-                        r'"monthlyListeners":(\d+)',  # JSON data
-                        r'monthlyListeners["\s:]+(\d+)',  # Alternative JSON
-                        r'([\d,]+)\s*listeners\s*monthly',  # Alternative format
-                        r'"stats":\{"listeners":(\d+)',  # Stats JSON
-                    ]
-                    
-                    for pattern in listener_patterns:
-                        matches = re.findall(pattern, result.html, re.IGNORECASE)
-                        if matches:
+                    # Use enhanced extractor
+                    try:
+                        from enhanced_extractors import EnhancedSpotifyExtractor
+                        spotify_data = EnhancedSpotifyExtractor.extract_artist_data(result.html)
+                        
+                        # Extract monthly listeners
+                        if spotify_data.get("monthly_listeners"):
                             try:
-                                for match in matches:
-                                    parsed = self._parse_number(match)
-                                    if 0 < parsed < 1000000000:  # Reasonable range
-                                        monthly_listeners = parsed
+                                parsed_listeners = self._parse_number(spotify_data["monthly_listeners"])
+                                if parsed_listeners > 0:
+                                    enriched_data.profile.follower_counts['spotify_monthly_listeners'] = parsed_listeners
+                                    logger.info(f"✅ Monthly listeners: {parsed_listeners:,}")
+                            except Exception as e:
+                                logger.warning(f"Error parsing monthly listeners: {e}")
+                        
+                        # Extract artist name (validation)
+                        if spotify_data.get("artist_name") and not enriched_data.profile.name:
+                            enriched_data.profile.name = spotify_data["artist_name"]
+                        
+                        # Extract biography
+                        if spotify_data.get("biography"):
+                            enriched_data.profile.bio = spotify_data["biography"]
+                            logger.info(f"✅ Biography found: {spotify_data['biography'][:100]}...")
+                        
+                        # Extract top tracks
+                        if spotify_data.get("top_tracks"):
+                            enriched_data.top_tracks = spotify_data["top_tracks"][:10]  # Top 10
+                            logger.info(f"✅ Extracted {len(enriched_data.top_tracks)} valid tracks (top 5)")
+                            logger.info(f"🎵 Top tracks: {enriched_data.top_tracks[:4]}")
+                        
+                        # Extract genres
+                        if spotify_data.get("genres"):
+                            enriched_data.profile.genres = spotify_data["genres"]
+                            logger.info(f"✅ Genres: {enriched_data.profile.genres}")
+                        
+                        logger.info("✅ Enhanced Spotify extraction completed successfully")
+                        
+                    except Exception as e:
+                        logger.error(f"Enhanced Spotify extraction failed: {e}")
+                        # Fallback to original extraction
+                        monthly_patterns = [
+                            r'(\d{1,3}(?:,\d{3})*)\s*monthly\s*listeners',  # "1,234,567 monthly listeners"
+                            r'([\d,.]+[KMB])\s*monthly\s*listeners',        # "1.2M monthly listeners"
+                            r'"monthlyListeners":\s*(\d+)',                 # JSON: "monthlyListeners": 123456
+                            r'monthlyListeners["\']?\s*:\s*(\d+)',          # monthlyListeners: 123456
+                            r'listeners["\']?\s*:\s*(\d+)',                 # listeners: 123456
+                            r'data-testid="monthly-listeners"[^>]*>([^<]*\d[^<]*)<',  # Test ID
+                            r'<span[^>]*>\s*(\d{1,3}(?:,\d{3})*)\s*monthly\s*listeners\s*</span>',  # Span tag
+                        ]
+                        
+                        for pattern in monthly_patterns:
+                            matches = re.findall(pattern, result.html, re.IGNORECASE)
+                            if matches:
+                                try:
+                                    listener_text = matches[0]
+                                    parsed_listeners = self._parse_number(listener_text)
+                                    if parsed_listeners > 0:
+                                        enriched_data.profile.follower_counts['spotify_monthly_listeners'] = parsed_listeners
+                                        logger.info(f"✅ Monthly listeners: {parsed_listeners:,}")
                                         break
-                                if monthly_listeners > 0:
-                                    break
-                            except (ValueError, TypeError):
-                                continue
+                                except:
+                                    continue
                     
-                    if monthly_listeners > 0:
-                        enriched_data.profile.follower_counts['spotify_monthly_listeners'] = monthly_listeners
-                        logger.info(f"✅ Found {monthly_listeners:,} monthly listeners")
-                    
-                    # 2. Extract artist bio/biography with improved filtering
+                    # 2. Enhanced biography extraction
                     bio_patterns = [
-                        r'<div[^>]*data-testid[^>]*biography[^>]*>([^<]+)',
-                        r'<div[^>]*about[^>]*>([^<]+)',
+                        r'<div[^>]*class="[^"]*bio[^"]*"[^>]*>([^<]+)</div>',
+                        r'<p[^>]*class="[^"]*bio[^"]*"[^>]*>([^<]+)</p>',
+                        r'<div[^>]*data-testid="artist-about"[^>]*>([^<]+)</div>',
                         r'"biography":\s*"([^"]+)"',
-                        r'"about":\s*"([^"]+)"',
-                        r'<section[^>]*>\s*<div[^>]*>\s*<p[^>]*>([^<]+)</p>',
+                        r'"description":\s*"([^"]+)"',
+                        r'<meta[^>]*name="description"[^>]*content="([^"]+)"',
+                        r'data-testid="description"[^>]*>([^<]+)<',
+                        r'about[^>]*>\s*([^<]{50,500})\s*<',  # General about content
                     ]
                     
                     for pattern in bio_patterns:
                         matches = re.findall(pattern, result.html, re.IGNORECASE | re.DOTALL)
                         if matches:
-                            for match in matches:
-                                clean_bio = re.sub(r'<[^>]+>', '', match).strip()
-                                # Filter out CSS, JavaScript, or HTML-like content
-                                if (len(clean_bio) > 20 and 
-                                    not re.search(r'\{[^}]*\}|#[a-f0-9]{3,6}|margin|padding|width|height|color:', clean_bio, re.IGNORECASE) and
-                                    not clean_bio.startswith(('section{', 'div{', '.', '#')) and
-                                    'cookie' not in clean_bio.lower() and
-                                    'policy' not in clean_bio.lower()):
-                                    enriched_data.profile.bio = clean_bio[:500]
-                                    logger.info(f"✅ Found clean artist bio: {clean_bio[:50]}...")
-                                    break
-                            if enriched_data.profile.bio:
+                            bio_text = re.sub(r'<[^>]+>', '', matches[0]).strip()  # Remove HTML tags
+                            if len(bio_text) > 30:  # Ensure substantial content
+                                enriched_data.profile.bio = bio_text[:600]  # Store more bio content
+                                logger.info(f"✅ Biography found: {bio_text[:80]}...")
                                 break
                     
-                    # 3. Extract top city/location
+                    # 3. Enhanced top city extraction
                     city_patterns = [
-                        r'"topCity":\s*"([^"]+)"',
-                        r'top\s*city[^>]*>([^<]+)',
-                        r'"city":\s*"([^"]+)"',
-                        r'location[^>]*>([^<]+)',
-                        r'"worldRank":\s*\d+,\s*"country":\s*"([^"]+)"',
+                        r'top\s*city[^>]*>([^<]+)<',                    # "Top city: New York"
+                        r'where\s*your\s*music\s*is\s*most\s*popular[^>]*>([^<]+)<',  # Spotify's phrasing
+                        r'(\w+(?:\s+\w+)*)\s*is\s*where\s*your\s*music',  # "New York is where your music..."
+                        r'"topCity":\s*"([^"]+)"',                       # JSON top city
+                        r'"city":\s*"([^"]+)"',                          # JSON city
+                        r'most\s*popular\s*in[^>]*>([^<]+)<',           # "Most popular in New York"
+                        r'listeners\s*in[^>]*>([^<]*(?:New York|Los Angeles|London|Toronto|Sydney|Berlin|Paris|Tokyo|Mexico City|São Paulo|Chicago|Miami|Atlanta|Nashville|Austin)[^<]*)<',
+                        r'top\s*location[^>]*>([^<]+)<',                # "Top location: City"
                     ]
                     
                     for pattern in city_patterns:
                         matches = re.findall(pattern, result.html, re.IGNORECASE)
                         if matches:
-                            top_city = matches[0].strip()
-                            if len(top_city) > 2:
-                                enriched_data.profile.metadata['spotify_top_city'] = top_city
-                                logger.info(f"✅ Found top city: {top_city}")
+                            city_text = matches[0].strip()
+                            # Clean and validate city name
+                            if len(city_text) > 2 and len(city_text) < 50 and not city_text.isdigit():
+                                enriched_data.profile.metadata['spotify_top_city'] = city_text
+                                logger.info(f"✅ Top city: {city_text}")
                                 break
                     
-                    # 4. Extract genres
+                    # 4. Enhanced genre extraction
                     genre_patterns = [
-                        r'"genres":\s*\[([^\]]+)\]',
-                        r'genre[^>]*>([^<]+)',
-                        r'"genre":\s*"([^"]+)"',
+                        r'"genres":\s*\[([^\]]+)\]',                    # JSON array
+                        r'<span[^>]*class="[^"]*genre[^"]*"[^>]*>([^<]+)</span>',  # Genre spans
+                        r'data-testid="genre"[^>]*>([^<]+)<',          # Test ID
+                        r'<a[^>]*href="/genre/[^"]*"[^>]*>([^<]+)</a>', # Genre links
+                        r'"genre":\s*"([^"]+)"',                        # Single genre JSON
                     ]
                     
                     for pattern in genre_patterns:
                         matches = re.findall(pattern, result.html, re.IGNORECASE)
                         if matches:
-                            genres_text = matches[0]
-                            # Parse JSON-like genre array
-                            if '"' in genres_text:
+                            if pattern.startswith('"genres"'):  # JSON array pattern
+                                genres_text = matches[0]
                                 genre_list = re.findall(r'"([^"]+)"', genres_text)
                                 if genre_list:
-                                    enriched_data.profile.genres = genre_list[:5]  # Limit to 5 genres
-                                    logger.info(f"✅ Found genres: {', '.join(genre_list[:3])}")
+                                    enriched_data.profile.genres = genre_list[:5]
+                                    logger.info(f"✅ Genres: {', '.join(genre_list[:3])}")
+                                    break
+                            else:  # Individual genre patterns
+                                genre_list = [match.strip() for match in matches[:5]]
+                                if genre_list:
+                                    enriched_data.profile.genres = genre_list
+                                    logger.info(f"✅ Genres: {', '.join(genre_list[:3])}")
                                     break
                     
-                    # 5. Extract social media links from Spotify page with better filtering
+                    # 5. Enhanced social media link extraction from Spotify page
                     social_link_patterns = {
                         'instagram': r'href="(https?://(?:www\.)?instagram\.com/[^"/?]+)/?"',
                         'twitter': r'href="(https?://(?:www\.)?(?:twitter|x)\.com/[^"/?]+)/?"',
@@ -456,14 +529,18 @@ class Crawl4AIEnrichmentAgent:
                                 enriched_data.profile.social_links[platform] = valid_links[0]
                                 logger.info(f"✅ Found {platform}: {valid_links[0]}")
                     
-                    # 6. Extract top tracks using enhanced patterns
-                    tracks = self._extract_spotify_tracks(result.html)
+                    # 6. Extract top 5 tracks with enhanced patterns and filtering
+                    tracks = await self._extract_spotify_tracks_with_play_counts(result.html, enriched_data.profile.name)
                     if tracks:
-                        enriched_data.profile.metadata['top_tracks'] = tracks[:10]  # Store up to 10 tracks
-                        logger.info(f"✅ Found {len(tracks)} tracks")
+                        enriched_data.profile.metadata['top_tracks'] = tracks  # Already limited to 5 tracks
+                        logger.info(f"✅ Found {len(tracks)} valid tracks (top 5)")
                         
-                        # Analyze lyrics for top tracks
-                        await self._enrich_lyrics(enriched_data)
+                        # Analyze lyrics for top tracks using Musixmatch
+                        await self._enrich_lyrics_with_musixmatch(enriched_data)
+                    
+                    # 7. Validate social media links against YouTube data if available
+                    if hasattr(enriched_data.profile, 'social_links') and enriched_data.profile.social_links:
+                        self._validate_social_links_consistency(enriched_data)
                     
                     logger.info(f"✅ Spotify enrichment complete")
                     
@@ -579,6 +656,52 @@ class Crawl4AIEnrichmentAgent:
             logger.error(f"❌ Spotify search error for {artist_name}: {str(e)}")
             # Don't let Spotify errors break the entire enrichment
             logger.info("⚠️ Continuing without Spotify data")
+    
+    async def _enrich_spotify_api(self, artist_name: str, enriched_data: EnrichedArtistData):
+        """Enrich with Spotify API data including avatar and genres"""
+        try:
+            logger.info(f"🎵 Using Spotify API to get avatar and genres for: {artist_name}")
+            
+            # Get enriched data from Spotify API
+            spotify_data = await self.spotify_client.get_enriched_artist_data(artist_name)
+            
+            if spotify_data:
+                # Update artist profile with API data
+                if spotify_data.get('avatar_url'):
+                    enriched_data.profile.metadata['avatar_url'] = spotify_data['avatar_url']
+                    logger.info(f"✅ Added avatar URL: {spotify_data['avatar_url'][:50]}...")
+                
+                if spotify_data.get('genres'):
+                    enriched_data.profile.genres = spotify_data['genres']
+                    logger.info(f"✅ Added genres: {', '.join(spotify_data['genres'][:3])}")
+                
+                # Add additional Spotify API data to metadata
+                api_metadata = {
+                    'spotify_id': spotify_data.get('spotify_id'),
+                    'spotify_followers': spotify_data.get('followers', 0),
+                    'spotify_popularity': spotify_data.get('popularity', 0),
+                    'spotify_top_tracks': spotify_data.get('top_tracks', []),
+                    'spotify_genres': spotify_data.get('genres', [])  # Store genres in metadata for database
+                }
+                
+                # Update existing metadata
+                enriched_data.profile.metadata.update(api_metadata)
+                
+                # If we don't have monthly listeners from scraping, use followers as estimate
+                if not enriched_data.profile.follower_counts.get('spotify_monthly_listeners'):
+                    if spotify_data.get('followers', 0) > 0:
+                        # Rough estimate: monthly listeners ≈ 20% of followers
+                        estimated_listeners = int(spotify_data['followers'] * 0.2)
+                        enriched_data.profile.follower_counts['spotify_monthly_listeners'] = estimated_listeners
+                        logger.info(f"✅ Estimated monthly listeners: {estimated_listeners:,}")
+                
+                logger.info(f"✅ Spotify API enrichment complete for {artist_name}")
+            else:
+                logger.warning(f"⚠️ No Spotify API data found for: {artist_name}")
+                
+        except Exception as e:
+            logger.error(f"❌ Spotify API enrichment error for {artist_name}: {e}")
+            # Don't let API errors break enrichment
     
     async def _enrich_instagram(self, instagram_url: str, enriched_data: EnrichedArtistData):
         """Enrich with Instagram data using LLM content filtering"""
@@ -1057,7 +1180,19 @@ class Crawl4AIEnrichmentAgent:
                 )
                 
                 if result.success:
-                    # Try structured extraction
+                    # Use enhanced extractor first
+                    try:
+                        from enhanced_extractors import EnhancedMusixmatchExtractor
+                        lyrics_data = EnhancedMusixmatchExtractor.extract_lyrics_data(result.html)
+                        
+                        if lyrics_data.get("lyrics") and len(lyrics_data["lyrics"]) > 20:
+                            logger.info(f"✅ Enhanced extractor found lyrics ({len(lyrics_data['lyrics'])} chars)")
+                            return lyrics_data["lyrics"]
+                        
+                    except Exception as e:
+                        logger.warning(f"Enhanced lyrics extraction failed: {e}")
+                    
+                    # Try structured extraction fallback
                     if result.extracted_content:
                         try:
                             lyrics_data = json.loads(result.extracted_content)
@@ -1182,48 +1317,694 @@ class Crawl4AIEnrichmentAgent:
         else:
             return "No clear themes identified"
     
-    def _extract_spotify_tracks(self, html: str) -> List[Dict[str, Any]]:
-        """Extract top tracks from Spotify HTML with enhanced patterns"""
+    async def _extract_spotify_tracks_with_play_counts(self, html: str, artist_name: str) -> List[Dict[str, Any]]:
+        """Extract top 5 tracks from Spotify HTML with proper filtering to avoid UI elements"""
         tracks = []
         
-        # Multiple patterns for track extraction
+        logger.debug(f"Extracting tracks with play counts from HTML of length: {len(html)}")
+        
+        # Enhanced patterns based on actual Spotify structure
         track_patterns = [
-            # Pattern 1: aria-label with track info
-            r'<a[^>]*aria-label="([^"]+)"[^>]*data-testid="top-track-link"[^>]*>',
-            # Pattern 2: track title elements
-            r'<div[^>]*data-testid="track-title"[^>]*>([^<]+)</div>',
-            # Pattern 3: JSON track data
-            r'"name":\s*"([^"]+)"[^}]*"type":\s*"track"',
-            # Pattern 4: Track link patterns
+            # Pattern 1: Modern Spotify internal track links with data-testid
+            r'data-testid="internal-track-link"[^>]*href="/track/[A-Za-z0-9]+"[^>]*>.*?<div[^>]*>([^<]+)</div>',
+            # Pattern 2: Track list row structure
+            r'data-testid="tracklist-row"[^>]*>.*?href="/track/[A-Za-z0-9]+"[^>]*>.*?<div[^>]*>([^<]+)</div>',
+            # Pattern 3: Alternative track link structure
+            r'<a[^>]*href="/track/([A-Za-z0-9]+)"[^>]*data-testid="internal-track-link"[^>]*>.*?<div[^>]*>([^<]+)</div>',
+            # Pattern 4: JSON track data if available
+            r'"track":\s*{\s*"name":\s*"([^"]+)"[^}]*"popularity":\s*(\d+)',
+            # Pattern 5: Broader track link pattern
+            r'href="/track/[A-Za-z0-9]+"[^>]*>.*?<div[^>]*class="[^"]*text[^"]*"[^>]*>([^<]+)</div>',
+        ]
+        
+        # UI elements to filter out
+        ui_elements = {
+            'add to liked songs', 'liked songs', 'accept cookies', 'cookie policy', 
+            'privacy policy', 'show all', 'show more', 'view all', 'see all',
+            'follow', 'share', 'more options', 'play', 'pause', 'shuffle',
+            'repeat', 'queue', 'lyrics', 'credits', 'album', 'artist',
+            'playlist', 'download', 'premium', 'advertisement', 'ad',
+            'iab2v2', 'cookie', 'terms', 'help', 'about', 'contact',
+            'support', 'legal', 'toggle', 'menu', 'search', 'home',
+            'browse', 'library', 'made for you', 'recently played',
+            'your episodes', 'your shows', 'create playlist'
+        }
+        
+        for pattern_idx, pattern in enumerate(track_patterns):
+            try:
+                matches = re.findall(pattern, html, re.IGNORECASE | re.DOTALL)
+                if matches:
+                    logger.debug(f"Pattern {pattern_idx + 1} found {len(matches)} potential tracks")
+                    
+                    for match in matches:
+                        # Handle different match structures based on pattern
+                        if isinstance(match, tuple):
+                            if pattern_idx == 2:  # Pattern 3: track ID + name
+                                track_id, track_name = match
+                                play_count = 0
+                            elif pattern_idx == 3:  # Pattern 4: JSON with popularity
+                                track_name, popularity = match
+                                play_count = int(popularity) if popularity.isdigit() else 0
+                            else:  # Other patterns return just track name
+                                track_name = match[0] if len(match) > 0 else str(match)
+                                play_count = 0
+                        else:
+                            track_name = str(match)
+                            play_count = 0
+                        
+                        # Clean and validate track name
+                        track_name = self._clean_track_name(track_name)
+                        
+                        # Advanced filtering to exclude UI elements
+                        if self._is_valid_track_name(track_name, ui_elements, artist_name):
+                            # Check for duplicates
+                            if track_name not in [t['name'] for t in tracks]:
+                                tracks.append({
+                                    "name": track_name,
+                                    "play_count": play_count,
+                                    "position": len(tracks) + 1,
+                                    "source": f"pattern_{pattern_idx + 1}",
+                                    "confidence": 0.8 if pattern_idx < 3 else 0.6
+                                })
+                                
+                                # Stop at 5 tracks as requested
+                                if len(tracks) >= 5:
+                                    break
+                    
+                    if tracks:
+                        logger.info(f"Found {len(tracks)} valid tracks using pattern {pattern_idx + 1}")
+                        break
+                        
+            except Exception as e:
+                logger.warning(f"Error with track pattern {pattern_idx + 1}: {e}")
+                continue
+        
+        # If no tracks found with specific patterns, try a more targeted approach
+        if not tracks:
+            logger.debug("No tracks found with specific patterns, trying targeted extraction")
+            tracks = await self._extract_tracks_fallback(html, artist_name, ui_elements)
+        
+        # Sort by confidence and play count
+        tracks.sort(key=lambda x: (-x.get('confidence', 0), -x.get('play_count', 0)))
+        
+        # Limit to top 5 as requested
+        final_tracks = tracks[:5]
+        
+        logger.info(f"✅ Extracted {len(final_tracks)} valid tracks (top 5)")
+        if final_tracks:
+            track_names = [t['name'] for t in final_tracks]
+            logger.info(f"🎵 Top tracks: {track_names}")
+        else:
+            logger.warning("⚠️ No valid track names extracted - may indicate page structure changes")
+        
+        return final_tracks
+    
+    def _clean_track_name(self, track_name: str) -> str:
+        """Clean track name and remove unwanted text"""
+        if not track_name:
+            return ""
+        
+        # Remove HTML entities and extra whitespace
+        track_name = re.sub(r'&[a-zA-Z0-9#]+;', '', track_name)
+        track_name = re.sub(r'\s+', ' ', track_name).strip()
+        
+        # Remove common suffixes that aren't part of track names
+        suffixes_to_remove = [
+            r'\s*\([^)]*official[^)]*\)',
+            r'\s*\([^)]*music[^)]*video[^)]*\)',
+            r'\s*\([^)]*feat\.?[^)]*\)',
+            r'\s*\([^)]*ft\.?[^)]*\)',
+            r'\s*\([^)]*remix[^)]*\)',
+            r'\s*\([^)]*version[^)]*\)',
+            r'\s*\([^)]*edit[^)]*\)'
+        ]
+        
+        for suffix_pattern in suffixes_to_remove:
+            track_name = re.sub(suffix_pattern, '', track_name, flags=re.IGNORECASE)
+        
+        # Remove artist name if it appears at the start
+        track_name = re.sub(r'^[^-]+-\s*', '', track_name).strip()
+        
+        # Remove quotes and brackets if they wrap the entire name
+        track_name = track_name.strip('\'"()[]{}')
+        
+        return track_name.strip()
+    
+    def _is_valid_track_name(self, track_name: str, ui_elements: set, artist_name: str) -> bool:
+        """Validate if the extracted text is actually a track name"""
+        if not track_name or len(track_name) < 2:
+            return False
+        
+        track_lower = track_name.lower().strip()
+        
+        # Check against UI elements
+        if track_lower in ui_elements:
+            return False
+        
+        # Check for partial matches with UI elements
+        for ui_element in ui_elements:
+            if ui_element in track_lower or track_lower in ui_element:
+                return False
+        
+        # Filter out obvious non-track content
+        invalid_patterns = [
+            r'^https?://',  # URLs
+            r'^\d+:\d+',    # Timestamps
+            r'^[a-f0-9]{20,}$',  # Long hex strings (IDs)
+            r'^[A-Z0-9_]{10,}$',  # All caps IDs
+            r'^\d+$',       # Pure numbers
+            r'copyright|©|℗',  # Copyright symbols
+            r'all rights reserved',
+            r'terms of use',
+            r'privacy policy',
+            r'cookie',
+            r'advertisement',
+            r'sponsored',
+            r'^(play|pause|stop|next|previous|shuffle|repeat)$',
+            r'^(volume|mute|unmute)$',
+            r'^(search|filter|sort)$'
+        ]
+        
+        for pattern in invalid_patterns:
+            if re.search(pattern, track_lower):
+                return False
+        
+        # Must contain some alphabetic characters
+        if not re.search(r'[a-zA-Z]', track_name):
+            return False
+        
+        # Reasonable length (not too short, not too long)
+        if len(track_name) > 100:
+            return False
+        
+        # Not just the artist name
+        if track_lower == artist_name.lower().strip():
+            return False
+        
+        return True
+    
+    async def _extract_tracks_fallback(self, html: str, artist_name: str, ui_elements: set) -> List[Dict[str, Any]]:
+        """Fallback method for track extraction with stricter filtering"""
+        tracks = []
+        
+        try:
+            # Look for any links to /track/ URLs and extract surrounding text
+            track_url_pattern = r'<a[^>]*href="/track/([A-Za-z0-9]+)"[^>]*>([^<]+)</a>'
+            matches = re.findall(track_url_pattern, html)
+            
+            for track_id, track_text in matches:
+                track_name = self._clean_track_name(track_text)
+                
+                if self._is_valid_track_name(track_name, ui_elements, artist_name):
+                    tracks.append({
+                        "name": track_name,
+                        "track_id": track_id,
+                        "play_count": 0,
+                        "position": len(tracks) + 1,
+                        "source": "fallback_track_links",
+                        "confidence": 0.7
+                    })
+                    
+                    if len(tracks) >= 5:
+                        break
+            
+            # If still no tracks, try to find song-like text near "popular" sections
+            if not tracks:
+                popular_section_pattern = r'popular.*?<a[^>]*href="/track/[^"]*"[^>]*>([^<]+)</a>'
+                matches = re.findall(popular_section_pattern, html, re.IGNORECASE | re.DOTALL)
+                
+                for match in matches[:5]:
+                    track_name = self._clean_track_name(match)
+                    if self._is_valid_track_name(track_name, ui_elements, artist_name):
+                        tracks.append({
+                            "name": track_name,
+                            "play_count": 0,
+                            "position": len(tracks) + 1,
+                            "source": "fallback_popular_section",
+                            "confidence": 0.5
+                        })
+                        
+                        if len(tracks) >= 5:
+                            break
+        
+        except Exception as e:
+            logger.error(f"Error in fallback track extraction: {e}")
+        
+        return tracks
+    
+    async def _enrich_lyrics_with_musixmatch(self, enriched_data: EnrichedArtistData):
+        """Enhanced lyrics enrichment using Musixmatch with DeepSeek analysis"""
+        try:
+            top_tracks = enriched_data.profile.metadata.get('top_tracks', [])
+            if not top_tracks:
+                logger.info("No top tracks available for lyrics analysis")
+                return
+            
+            lyrics_analyses = []
+            artist_name = enriched_data.profile.name
+            
+            # Analyze top 5 tracks (or fewer if not available)
+            for track in top_tracks[:5]:
+                track_name = track.get('name', '')
+                if not track_name:
+                    continue
+                
+                logger.info(f"🎤 Getting lyrics for: {track_name} by {artist_name}")
+                
+                # Get lyrics from Musixmatch
+                lyrics_text = await self._get_musixmatch_lyrics_enhanced(artist_name, track_name)
+                
+                if lyrics_text:
+                    # Analyze lyrics with DeepSeek if available
+                    if self.ai_cleaner and self.ai_cleaner.is_available():
+                        analysis = await self._analyze_lyrics_with_deepseek(lyrics_text, track_name, artist_name)
+                        if analysis:
+                            lyrics_analyses.append(analysis)
+                            logger.info(f"✅ Analyzed lyrics for: {track_name}")
+                    else:
+                        # Fallback to simple analysis
+                        simple_analysis = self._simple_lyrics_analysis(lyrics_text, track_name)
+                        lyrics_analyses.append(simple_analysis)
+                        logger.info(f"✅ Simple analysis for: {track_name}")
+                else:
+                    logger.warning(f"⚠️ Could not find lyrics for: {track_name}")
+            
+            # Combine analyses and store
+            if lyrics_analyses:
+                themes = self._combine_lyrics_analyses(lyrics_analyses)
+                enriched_data.profile.metadata['lyrics_themes'] = themes
+                enriched_data.profile.metadata['lyrics_analysis_count'] = len(lyrics_analyses)
+                logger.info(f"✅ Lyrics analysis complete: {themes}")
+            else:
+                logger.warning("⚠️ No lyrics analyses available")
+                
+        except Exception as e:
+            logger.error(f"❌ Musixmatch lyrics enrichment error: {str(e)}")
+    
+    async def _get_musixmatch_lyrics_enhanced(self, artist_name: str, track_name: str) -> str:
+        """Enhanced Musixmatch lyrics extraction with human verification bypass"""
+        try:
+            # Clean names for URL formatting (Musixmatch format: artist-name/song-name)
+            clean_artist = re.sub(r'[^a-zA-Z0-9\s]', '', artist_name).replace(' ', '-').lower()
+            clean_track = re.sub(r'[^a-zA-Z0-9\s]', '', track_name).replace(' ', '-').lower()
+            
+            # Correct Musixmatch URL format (note: no www subdomain)
+            urls_to_try = [
+                f"https://musixmatch.com/lyrics/{clean_artist}/{clean_track}",
+                f"https://musixmatch.com/lyrics/{clean_artist.replace('-', '')}/{clean_track.replace('-', '')}",
+                f"https://musixmatch.com/lyrics/{artist_name.replace(' ', '-').lower()}/{track_name.replace(' ', '-').lower()}"
+            ]
+            
+            for url in urls_to_try:
+                try:
+                    logger.debug(f"Trying Musixmatch URL: {url}")
+                    
+                    crawler_config = CrawlerRunConfig(
+                        cache_mode=CacheMode.BYPASS,
+                        wait_until="domcontentloaded",
+                        page_timeout=25000,  # Longer timeout for verification handling
+                        delay_before_return_html=4.0,  # More time for page processing
+                        js_code="""
+                        // Enhanced Musixmatch verification bypass and lyrics extraction
+                        console.log('Starting Musixmatch lyrics extraction...');
+                        
+                        // Wait for initial page load
+                        await new Promise(resolve => setTimeout(resolve, 4000));
+                        
+                        // Handle human verification prompts
+                        const verificationElements = [
+                            '[data-testid="captcha"]',
+                            '.captcha',
+                            '[class*="verification"]',
+                            '[class*="human"]',
+                            '.cloudflare-challenge',
+                            '#challenge-form',
+                            '.challenge-form'
+                        ];
+                        
+                        let verificationFound = false;
+                        for (const selector of verificationElements) {
+                            const element = document.querySelector(selector);
+                            if (element && element.offsetParent !== null) {
+                                console.log('Human verification detected:', selector);
+                                verificationFound = true;
+                                break;
+                            }
+                        }
+                        
+                        if (verificationFound) {
+                            console.log('Attempting to handle verification...');
+                            // Wait longer and try to bypass
+                            await new Promise(resolve => setTimeout(resolve, 5000));
+                            
+                            // Try clicking through verification if possible
+                            const continueButtons = document.querySelectorAll('button[type="submit"], input[type="submit"], .btn-continue, [class*="continue"]');
+                            for (const btn of continueButtons) {
+                                if (btn.textContent.toLowerCase().includes('continue') || 
+                                    btn.textContent.toLowerCase().includes('proceed')) {
+                                    try {
+                                        btn.click();
+                                        await new Promise(resolve => setTimeout(resolve, 3000));
+                                        break;
+                                    } catch(e) {}
+                                }
+                            }
+                        }
+                        
+                        // Close any modal overlays or cookie banners
+                        const overlaySelectors = [
+                            '[data-testid="modal-close"]',
+                            '.close-btn',
+                            '.modal-close',
+                            '[aria-label="Close"]',
+                            '.cookie-banner button',
+                            '[class*="cookie"] button',
+                            '.gdpr-accept',
+                            '[class*="accept"]'
+                        ];
+                        
+                        for (const selector of overlaySelectors) {
+                            const buttons = document.querySelectorAll(selector);
+                            buttons.forEach(btn => {
+                                try { 
+                                    if (btn.offsetParent !== null) {
+                                        btn.click(); 
+                                    }
+                                } catch(e) {}
+                            });
+                        }
+                        
+                        // Wait for content to settle
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        
+                        console.log('Musixmatch page processing complete');
+                        """,
+                        magic=True,
+                        simulate_user=True
+                    )
+                    
+                    async with AsyncWebCrawler(config=self.browser_config) as crawler:
+                        result = await crawler.arun(url=url, config=crawler_config)
+                        
+                        if result.success and result.html:
+                            # Enhanced lyrics extraction patterns
+                            lyrics_patterns = [
+                                r'<span[^>]*class="lyrics__content[^"]*"[^>]*>([^<]+)</span>',
+                                r'<span[^>]*data-testid="lyrics-line"[^>]*>([^<]+)</span>',
+                                r'<p[^>]*class="[^"]*lyrics[^"]*"[^>]*>([^<]+)</p>',
+                                r'"lyrics":\s*"([^"]+)"',
+                                r'<div[^>]*class="[^"]*lyrics[^"]*"[^>]*>([^<]+)</div>',
+                            ]
+                            
+                            all_lyrics_parts = []
+                            
+                            for pattern in lyrics_patterns:
+                                matches = re.findall(pattern, result.html, re.DOTALL | re.IGNORECASE)
+                                if matches:
+                                    # Clean and combine lyrics parts
+                                    clean_parts = []
+                                    for match in matches:
+                                        clean_part = re.sub(r'<[^>]+>', '', match).strip()
+                                        if len(clean_part) > 3 and clean_part not in clean_parts:
+                                            clean_parts.append(clean_part)
+                                    
+                                    if clean_parts:
+                                        all_lyrics_parts.extend(clean_parts)
+                                        break
+                            
+                            if all_lyrics_parts:
+                                full_lyrics = ' '.join(all_lyrics_parts)
+                                if len(full_lyrics) > 50:  # Ensure substantial lyrics content
+                                    logger.info(f"✅ Found lyrics from Musixmatch ({len(full_lyrics)} chars)")
+                                    return full_lyrics[:2000]  # Limit length
+                                    
+                except Exception as e:
+                    logger.debug(f"Failed to get lyrics from {url}: {e}")
+                    continue
+            
+            logger.warning(f"⚠️ Could not extract lyrics for {track_name} by {artist_name}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Musixmatch lyrics extraction error: {str(e)}")
+            return None
+    
+    async def _analyze_lyrics_with_deepseek(self, lyrics: str, track_name: str, artist_name: str) -> Dict[str, Any]:
+        """Analyze lyrics using DeepSeek for sentiment and themes"""
+        try:
+            if not self.ai_cleaner or not self.ai_cleaner.is_available():
+                return None
+            
+            # Use the AI cleaner's capabilities for lyrics analysis
+            # Create a simple analysis task using the existing AI cleaner infrastructure
+            
+            # For now, fall back to simple analysis since we'd need to add lyrics analysis to AIDataCleaner
+            logger.info(f"🤖 Using simple analysis for lyrics (DeepSeek integration pending)")
+            return self._simple_lyrics_analysis(lyrics, track_name)
+            
+        except Exception as e:
+            logger.error(f"DeepSeek lyrics analysis error: {e}")
+            # Fallback to simple analysis
+            return self._simple_lyrics_analysis(lyrics, track_name)
+    
+    def _simple_lyrics_analysis(self, lyrics: str, track_name: str) -> Dict[str, Any]:
+        """Simple keyword-based lyrics analysis as fallback"""
+        try:
+            lyrics_lower = lyrics.lower()
+            
+            # Define keyword categories
+            themes = {
+                "love": ["love", "heart", "baby", "kiss", "forever", "together", "romance"],
+                "party": ["party", "dance", "club", "night", "fun", "celebrate", "drinks"],
+                "success": ["money", "rich", "success", "fame", "win", "top", "boss"],
+                "sadness": ["sad", "cry", "tears", "pain", "hurt", "broken", "alone"],
+                "empowerment": ["strong", "power", "fight", "rise", "overcome", "believe"]
+            }
+            
+            # Count theme occurrences
+            theme_scores = {}
+            for theme, keywords in themes.items():
+                score = sum(1 for keyword in keywords if keyword in lyrics_lower)
+                if score > 0:
+                    theme_scores[theme] = score
+            
+            # Determine primary theme
+            primary_theme = max(theme_scores, key=theme_scores.get) if theme_scores else "general"
+            
+            # Simple sentiment
+            positive_words = ["love", "happy", "good", "great", "amazing", "wonderful"]
+            negative_words = ["sad", "bad", "hurt", "pain", "cry", "broken"]
+            
+            pos_count = sum(1 for word in positive_words if word in lyrics_lower)
+            neg_count = sum(1 for word in negative_words if word in lyrics_lower)
+            
+            if pos_count > neg_count:
+                sentiment = "positive"
+            elif neg_count > pos_count:
+                sentiment = "negative"
+            else:
+                sentiment = "neutral"
+            
+            return {
+                "track": track_name,
+                "theme": f"Song explores themes of {primary_theme}",
+                "sentiment": sentiment,
+                "tags": list(theme_scores.keys())[:5],
+                "mood": primary_theme,
+                "analysis_source": "simple"
+            }
+            
+        except Exception as e:
+            logger.error(f"Simple lyrics analysis error: {e}")
+            return {
+                "track": track_name,
+                "theme": "Unable to analyze lyrics",
+                "sentiment": "neutral",
+                "tags": [],
+                "mood": "unknown",
+                "analysis_source": "error"
+            }
+    
+    def _validate_social_links_consistency(self, enriched_data: EnrichedArtistData):
+        """Validate social media links consistency between YouTube and Spotify data"""
+        try:
+            spotify_links = enriched_data.profile.social_links or {}
+            youtube_links = enriched_data.profile.metadata.get('youtube_social_links', {})
+            
+            validated_links = {}
+            inconsistencies = []
+            
+            # Check each platform for consistency
+            for platform in ['instagram', 'twitter', 'facebook']:
+                spotify_link = spotify_links.get(platform)
+                youtube_link = youtube_links.get(platform)
+                
+                if spotify_link and youtube_link:
+                    # Extract usernames for comparison
+                    spotify_username = self._extract_username_from_url(spotify_link, platform)
+                    youtube_username = self._extract_username_from_url(youtube_link, platform)
+                    
+                    if spotify_username and youtube_username:
+                        if spotify_username.lower() == youtube_username.lower():
+                            validated_links[platform] = spotify_link  # Prefer Spotify link (usually more accurate)
+                            logger.info(f"✅ {platform} link validated: {spotify_username}")
+                        else:
+                            # Inconsistency detected
+                            inconsistencies.append({
+                                "platform": platform,
+                                "spotify": spotify_link,
+                                "youtube": youtube_link,
+                                "spotify_username": spotify_username,
+                                "youtube_username": youtube_username
+                            })
+                            # Use Spotify link as primary (typically more reliable)
+                            validated_links[platform] = spotify_link
+                            logger.warning(f"⚠️ {platform} link inconsistency: Spotify={spotify_username}, YouTube={youtube_username}")
+                elif spotify_link:
+                    validated_links[platform] = spotify_link
+                elif youtube_link:
+                    validated_links[platform] = youtube_link
+            
+            # Update with validated links
+            enriched_data.profile.social_links.update(validated_links)
+            
+            if inconsistencies:
+                enriched_data.profile.metadata['social_link_inconsistencies'] = inconsistencies
+                logger.info(f"🔍 Found {len(inconsistencies)} social link inconsistencies (using Spotify as primary)")
+            else:
+                logger.info("✅ All social links are consistent between platforms")
+                
+        except Exception as e:
+            logger.error(f"❌ Social link validation error: {str(e)}")
+    
+    def _extract_username_from_url(self, url: str, platform: str) -> str:
+        """Extract username from social media URL"""
+        try:
+            if not url:
+                return ""
+            
+            # Remove protocol and www
+            clean_url = url.lower().replace('https://', '').replace('http://', '').replace('www.', '')
+            
+            if platform == 'instagram':
+                # instagram.com/username or instagram.com/username/
+                match = re.search(r'instagram\.com/([^/?]+)', clean_url)
+                return match.group(1) if match else ""
+            elif platform == 'twitter':
+                # twitter.com/username or x.com/username
+                match = re.search(r'(?:twitter|x)\.com/([^/?]+)', clean_url)
+                return match.group(1) if match else ""
+            elif platform == 'facebook':
+                # facebook.com/username
+                match = re.search(r'facebook\.com/([^/?]+)', clean_url)
+                return match.group(1) if match else ""
+            
+            return ""
+            
+        except Exception:
+            return ""
+    
+    def _extract_spotify_tracks(self, html: str) -> List[Dict[str, Any]]:
+        """Extract top tracks from Spotify HTML with enhanced patterns and debug logging"""
+        tracks = []
+        
+        logger.debug(f"Extracting tracks from HTML of length: {len(html)}")
+        
+        # Multiple patterns for track extraction - updated for current Spotify structure
+        track_patterns = [
+            # Pattern 1: Modern Spotify track links with aria-label
+            r'<a[^>]*aria-label="([^"]+)"[^>]*href="/track/[^"]*"[^>]*>',
+            # Pattern 2: Track title in data attributes
+            r'data-testid="track-title"[^>]*>([^<]+)<',
+            # Pattern 3: JSON-LD structured data
+            r'"name":\s*"([^"]+)"[^}]*"@type":\s*"MusicRecording"',
+            # Pattern 4: Track names in JavaScript variables
+            r'trackName["\']:\s*["\']([^"\']+)["\']',
+            # Pattern 5: Popular tracks section
+            r'<div[^>]*class="[^"]*track[^"]*"[^>]*>[^<]*<[^>]*>([^<]+)</[^>]*>',
+            # Pattern 6: Simple track link patterns
             r'<a[^>]*href="/track/[^"]*"[^>]*title="([^"]+)"',
-            # Pattern 5: Alternative track selectors
+            # Pattern 7: Track names in span elements
             r'<span[^>]*class="[^"]*track-name[^"]*"[^>]*>([^<]+)</span>',
+            # Pattern 8: Alternative JSON patterns
+            r'"trackName":\s*"([^"]+)"',
+            # Pattern 9: Track metadata
+            r'<meta[^>]*property="music:song"[^>]*content="([^"]+)"',
+            # Pattern 10: Broad search for any music-related content
+            r'(?:song|track|music)[^>]*>([^<]{3,50})</[^>]*>',
         ]
         
         for pattern_idx, pattern in enumerate(track_patterns):
-            matches = re.findall(pattern, html, re.IGNORECASE)
-            if matches:
-                logger.debug(f"Found tracks using pattern {pattern_idx + 1}: {len(matches)} matches")
-                
-                for i, match in enumerate(matches[:15]):  # Get up to 15 tracks
-                    # Clean track name
-                    if pattern_idx == 0:  # aria-label pattern
-                        track_name = match.split(' by ')[0] if ' by ' in match else match
-                    else:
-                        track_name = match
+            try:
+                matches = re.findall(pattern, html, re.IGNORECASE | re.DOTALL)
+                if matches:
+                    logger.debug(f"Pattern {pattern_idx + 1} found {len(matches)} potential tracks")
                     
-                    # Clean and validate track name
-                    track_name = track_name.strip()
-                    if len(track_name) > 2 and track_name not in [t['name'] for t in tracks]:
-                        tracks.append({
-                            "name": track_name,
-                            "position": len(tracks) + 1,
-                            "source": f"pattern_{pattern_idx + 1}"
-                        })
-                
-                # If we found tracks with this pattern, don't try others
-                if tracks:
-                    break
+                    for i, match in enumerate(matches[:20]):  # Get up to 20 potential tracks
+                        # Clean track name based on pattern type
+                        if pattern_idx == 0:  # aria-label pattern
+                            # Extract just the song name from "Song by Artist" format
+                            if ' by ' in match:
+                                track_name = match.split(' by ')[0].strip()
+                            elif ' - ' in match:
+                                track_name = match.split(' - ')[0].strip()
+                            else:
+                                track_name = match.strip()
+                        else:
+                            track_name = match.strip()
+                        
+                        # Validate track name
+                        if (len(track_name) > 2 and 
+                            len(track_name) < 100 and  # Reasonable length
+                            not track_name.lower().startswith(('http', 'www', 'spotify')) and
+                            track_name not in [t['name'] for t in tracks]):
+                            
+                            tracks.append({
+                                "name": track_name,
+                                "position": len(tracks) + 1,
+                                "source": f"pattern_{pattern_idx + 1}",
+                                "confidence": 0.8 if pattern_idx < 3 else 0.6  # Higher confidence for better patterns
+                            })
+                    
+                    # If we found good tracks with high-confidence patterns, use them
+                    if tracks and pattern_idx < 5:
+                        logger.info(f"Found {len(tracks)} tracks using pattern {pattern_idx + 1}")
+                        break
+                        
+            except Exception as e:
+                logger.warning(f"Error with pattern {pattern_idx + 1}: {e}")
+                continue
+        
+        # If no tracks found with specific patterns, try a more general approach
+        if not tracks:
+            logger.debug("No tracks found with specific patterns, trying general extraction")
+            
+            # Look for any text that might be song titles
+            general_patterns = [
+                r'<[^>]*>([A-Z][^<]{2,40})</[^>]*>',  # Capitalized text in tags
+                r'"([A-Z][^"]{2,40})"',  # Quoted capitalized text
+            ]
+            
+            potential_tracks = set()
+            for pattern in general_patterns:
+                matches = re.findall(pattern, html)
+                for match in matches:
+                    clean_match = match.strip()
+                    # Filter for likely song titles
+                    if (3 <= len(clean_match) <= 50 and
+                        not any(word in clean_match.lower() for word in 
+                               ['spotify', 'playlist', 'album', 'artist', 'follow', 'play', 'pause', 'next', 'previous']) and
+                        not clean_match.startswith(('http', 'www', '@', '#'))):
+                        potential_tracks.add(clean_match)
+            
+            # Convert to track format
+            for i, track_name in enumerate(list(potential_tracks)[:10]):
+                tracks.append({
+                    "name": track_name,
+                    "position": i + 1,
+                    "source": "general_extraction",
+                    "confidence": 0.3  # Lower confidence
+                })
         
         # Enhanced extraction: Look for play counts and popularity
         for track in tracks:
@@ -1231,30 +2012,41 @@ class Crawl4AIEnrichmentAgent:
             play_count_patterns = [
                 rf'{re.escape(track["name"])}[^<]*<[^>]*>([0-9,]+)\s*plays',
                 rf'track.*{re.escape(track["name"])}.*"playCount":(\d+)',
+                rf'{re.escape(track["name"])}[^0-9]*([0-9,]+)[^0-9]*plays',
             ]
             
             for pattern in play_count_patterns:
-                matches = re.findall(pattern, html, re.IGNORECASE)
-                if matches:
-                    try:
+                try:
+                    matches = re.findall(pattern, html, re.IGNORECASE)
+                    if matches:
                         track['play_count'] = self._parse_number(matches[0])
                         break
-                    except:
-                        continue
+                except:
+                    continue
         
-        # Remove duplicates and limit
+        # Remove duplicates and sort by confidence/position
         unique_tracks = []
         seen_names = set()
+        
+        # Sort by confidence first, then by position
+        tracks.sort(key=lambda x: (-x.get('confidence', 0), x.get('position', 999)))
+        
         for track in tracks[:10]:  # Limit to top 10
             track_name_lower = track['name'].lower()
             if track_name_lower not in seen_names:
                 seen_names.add(track_name_lower)
                 unique_tracks.append(track)
         
-        logger.debug(f"Extracted {len(unique_tracks)} unique tracks from Spotify")
+        logger.info(f"✅ Extracted {len(unique_tracks)} unique tracks from Spotify")
+        if unique_tracks:
+            logger.debug(f"Top tracks: {[t['name'] for t in unique_tracks[:3]]}")
+        else:
+            logger.warning("⚠️ No tracks extracted - this may prevent lyrics analysis")
+            # Save a sample of HTML for debugging
+            sample_html = html[:1000] + "..." if len(html) > 1000 else html
+            logger.debug(f"HTML sample: {sample_html}")
+        
         return unique_tracks
-    
-
     
     def _parse_number(self, text: str) -> int:
         """Parse numbers with K, M, B suffixes"""

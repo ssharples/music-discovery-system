@@ -394,7 +394,27 @@ class StorageAgent:
                 "enrichment_score": artist.enrichment_score,
                 "status": artist.status,
                 "discovery_date": datetime.now().isoformat(),
-                "last_updated": datetime.now().isoformat()
+                "last_updated": datetime.now().isoformat(),
+                
+                # Additional database columns
+                "youtube_channel_url": artist.metadata.get('youtube_channel_url'),
+                "youtube_subscriber_count": artist.follower_counts.get('youtube', 0),
+                "spotify_url": artist.spotify_url,
+                "spotify_monthly_listeners": artist.follower_counts.get('spotify_monthly_listeners', 0),
+                "spotify_top_city": artist.metadata.get('spotify_top_city'),
+                "spotify_biography": artist.metadata.get('spotify_biography'),
+                "spotify_genres": artist.metadata.get('spotify_genres', artist.genres),  # Use API genres or fallback
+                "spotify_followers": artist.metadata.get('spotify_followers', 0),
+                "spotify_popularity_score": artist.metadata.get('spotify_popularity', 0),
+                "instagram_url": artist.social_links.get('instagram'),
+                "instagram_follower_count": artist.follower_counts.get('instagram', 0),
+                "tiktok_url": artist.social_links.get('tiktok'),
+                "tiktok_follower_count": artist.follower_counts.get('tiktok', 0),
+                "tiktok_likes_count": artist.follower_counts.get('tiktok_likes', 0),
+                "twitter_url": artist.social_links.get('twitter'),
+                "facebook_url": artist.social_links.get('facebook'),
+                "website_url": artist.social_links.get('website'),
+                "music_theme_analysis": artist.metadata.get('music_theme_analysis', artist.lyrical_themes)
             }
             
             result = deps.supabase.table("artists").insert(artist_data).execute()
